@@ -1,8 +1,8 @@
 // Classificação tática das habilidades: categoria e forma de desenho na prancha.
 // A Valorant-API fornece nome, descrição e ícone, mas não diz "isto é uma smoke".
-// Esta tabela é uma curadoria manual baseada nas descrições da API. Ela não contém
-// alcance, duração nem qualquer número do jogo. Agente ou habilidade ausente aparece
-// como "Não classificada", nunca com uma categoria inventada.
+// Esta tabela é uma curadoria manual baseada nas descrições da API. Tamanhos e tempos ficam
+// em definitions.ts. Agente ou habilidade ausente aparece como "Não classificada", nunca
+// com uma categoria inventada.
 import type { AbilityCategory } from '../strategy/schema';
 
 export type AbilityShapeKind = 'circle' | 'wall' | 'path' | 'marker';
@@ -261,8 +261,8 @@ export const CATEGORY_COLOR: Record<AbilityCategory, string> = {
 };
 
 export const SHAPE_HINT: Record<AbilityShapeKind, string> = {
-  circle: 'Clique no mapa para posicionar. Arraste para definir o tamanho.',
-  wall: 'Arraste no mapa do início ao fim da parede.',
+  circle: 'Clique no mapa para posicionar. O tamanho é fixo para esta habilidade.',
+  wall: 'Clique para posicionar ou arraste para escolher a direção da parede.',
   path: 'Clique para adicionar pontos da trajetória e depois em Concluir.',
   marker: 'Clique no mapa para posicionar. Arraste para indicar a direção.',
 };
@@ -287,19 +287,3 @@ export function classifyAbility(agentUuid: string, slot: string): ClassifiedAbil
   };
 }
 
-/**
- * Tamanhos usados só para desenhar. Valem por categoria, não por habilidade,
- * justamente porque não representam o alcance real de nada no jogo. O usuário ajusta cada um.
- */
-export const VISUAL_DEFAULTS = {
-  radiusM: { smoke: 4.5, molotov: 4, area: 6, recon: 8, trap: 4, default: 5 } as Record<string, number>,
-  wallLengthM: 12,
-  wallThicknessM: 0.6,
-  travelMs: { projectile: 1500, recon: 1500, flash: 800, dash: 400, teleport: 0, area: 1000, default: 800 } as Record<string, number>,
-};
-
-export const defaultRadius = (category: AbilityCategory): number =>
-  VISUAL_DEFAULTS.radiusM[category] ?? VISUAL_DEFAULTS.radiusM.default!;
-
-export const defaultTravelMs = (category: AbilityCategory): number =>
-  VISUAL_DEFAULTS.travelMs[category] ?? VISUAL_DEFAULTS.travelMs.default!;

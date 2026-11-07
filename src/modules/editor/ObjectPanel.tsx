@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { presetSummary, utilityDefinition } from '../abilities/definitions';
 import { CATEGORY_LABEL } from '../abilities/taxonomy';
 import { findAgent, findMap, useCatalog } from '../catalog/catalogStore';
 import { useRoom } from '../multiplayer/roomStore';
@@ -164,11 +165,12 @@ function UtilityEditor({ utility, readOnly }: { utility: Utility; readOnly: bool
   const set = (next: Utility) => docActions.change([{ c: 'utilities', id: utility.id, after: next }], { coalesce: `utility:${utility.id}` });
   const shape = utility.shape;
   const owner = utility.ownerTokenId ? agents?.[utility.ownerTokenId] : undefined;
+  const definition = utilityDefinition(utility);
 
   const applyToRoute = () => {
     if (!owner || shape.type !== 'path') return;
     const route = owner.route ?? { startMs: 0, speedMps: 5, waypoints: [] };
-    const span = utility.travelMs;
+    const span = definition.timing.travelMs;
     const steps = shape.points.slice(1);
     const waypoints = steps.map((point, i) =>
       createWaypoint(point, { arriveAtMs: utility.timeMs + (span * (i + 1)) / steps.length }),
@@ -183,49 +185,24 @@ function UtilityEditor({ utility, readOnly }: { utility: Utility; readOnly: bool
         <div>
           <h3 className="display text-xl">{ability?.displayName ?? 'Habilidade'}</h3>
           <p className="text-sm text-ash">
-            {agent?.displayName ?? 'Agente'}, {CATEGORY_LABEL[utility.category].toLowerCase()}
+            {agent?.displayName ?? 'Agente'}, {CATEGORY_LABEL[definition.category].toLowerCase()}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <NumberField label="Ativa em" unit="s" testId="utility-time" disabled={readOnly} value={utility.timeMs / 1000} onChange={(s) => set({ ...utility, timeMs: s * 1000 })} />
-        <NumberField
-          label="Visível por"
-          unit="s"
-          disabled={readOnly || utility.durationMs === null}
-          testId="utility-duration"
-          value={(utility.durationMs ?? 0) / 1000}
-          onChange={(s) => set({ ...utility, durationMs: s * 1000 })}
-        />
-        <label className="col-span-2 flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            disabled={readOnly}
-            data-testid="utility-until-end"
-            checked={utility.durationMs === null}
-            onChange={(event) => set({ ...utility, durationMs: event.target.checked ? null : 5000 })}
-          />
-          Manter até o fim da estratégia
-        </label>
-        {shape.type === 'circle' && (
-          <div className="col-span-2">
-            <NumberField label="Raio visual" unit="m" min={0.5} testId="utility-radius" disabled={readOnly} value={shape.radiusM} onChange={(v) => { if (v >= 0.5) set({ ...utility, shape: { ...shape, radiusM: v } }); }} />
-          </div>
-        )}
         {shape.type === 'wall' && (
-          <div className="col-span-2">
-            <NumberField label="Espessura visual" unit="m" min={0.1} disabled={readOnly} value={shape.thicknessM} onChange={(v) => { if (v >= 0.1) set({ ...utility, shape: { ...shape, thicknessM: v } }); }} />
-          </div>
+          <NumberField label="Direção" unit="graus" step={5} testId="utility-facing" disabled={readOnly} value={toDegrees(shape.facing)} onChange={(deg) => set({ ...utility, shape: { ...shape, facing: toRadians(deg) } })} />
+        )}
+        {shape.type === 'marker' && (
+          <NumberField label="Direção" unit="graus" step={5} testId="utility-facing" disabled={readOnly} value={toDegrees(shape.facing ?? 0)} onChange={(deg) => set({ ...utility, shape: { ...shape, facing: toRadians(deg) } })} />
         )}
         {shape.type === 'path' && (
-          <>
-            <NumberField label="Tempo de percurso" unit="s" testId="utility-travel" disabled={readOnly} value={utility.travelMs / 1000} onChange={(s) => set({ ...utility, travelMs: s * 1000 })} />
-            <label className="flex items-end gap-2 pb-2 text-sm">
-              <input type="checkbox" disabled={readOnly} data-testid="utility-curved" checked={shape.curved} onChange={(event) => set({ ...utility, shape: { ...shape, curved: event.target.checked } })} />
-              Linha curva
-            </label>
-          </>
+          <label className="flex items-end gap-2 pb-2 text-sm">
+            <input type="checkbox" disabled={readOnly} data-testid="utility-curved" checked={shape.curved} onChange={(event) => set({ ...utility, shape: { ...shape, curved: event.target.checked } })} />
+            Linha curva
+          </label>
         )}
       </div>
 
@@ -234,14 +211,14 @@ function UtilityEditor({ utility, readOnly }: { utility: Utility; readOnly: bool
         <textarea className="field" rows={2} maxLength={280} disabled={readOnly} value={utility.note} onChange={(event) => set({ ...utility, note: event.target.value })} onBlur={() => docActions.endGesture()} />
       </label>
 
-      {shape.type === 'path' && (utility.category === 'dash' || utility.category === 'teleport') && (
+      {shape.type === 'path' && (definition.category === 'dash' || definition.category === 'teleport') && (
         <Button variant="ghost" disabled={readOnly || !owner} data-testid="apply-to-route" onClick={applyToRoute} title={owner ? undefined : 'Esta habilidade não está ligada a um agente no mapa.'}>
           Levar o agente por esta trajetória
         </Button>
       )}
 
       <p className="border-l-2 border-signal pl-2 text-xs text-ash" data-testid="visual-values-note">
-        Tamanho, tempo e trajetória são valores que você define para o plano. Não são dados oficiais do jogo.
+        <span data-testid="utility-preset">Preset fixo: {presetSummary(definition)}.</span> Você ajusta posição, direção, trajetória e instante. Tamanho e duração são aproximações do TacticLab, não dados oficiais do jogo.
       </p>
     </div>
   );

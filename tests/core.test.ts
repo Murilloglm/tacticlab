@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
+import { utilityDefinition } from '@/modules/abilities/definitions';
 import {
   boardToMap,
   distanceMeters,
@@ -13,7 +14,7 @@ import {
 } from '@/modules/coordinates';
 import { docActions, docStore, subscribeChanges, type Change } from '@/modules/strategy/docStore';
 import { parseStrategy } from '@/modules/strategy/schema';
-import { agentPoseAt, compileRoute, contentEndMs, formatTime, simulate, utilityStateAt } from '@/modules/timeline/simulate';
+import { agentPoseAt, compileRoute, contentEndMs, formatTime, simulate, utilityPathPoint, utilityStateAt } from '@/modules/timeline/simulate';
 import {
   applyKeyCode,
   createGhost,
@@ -184,23 +185,21 @@ describe('simulação determinística', () => {
     expect(agentPoseAt(still, 5000, FRAME)).toEqual({ point: { x: 0.3, y: 0.4 }, facing: 1, moving: false });
   });
 
-  it('utilidades respeitam início, duração e percurso', () => {
-    const smoke = {
-      id: 'u1',
-      agentUuid: 'x',
-      abilitySlot: 'Ability2',
-      ownerTokenId: null,
-      category: 'smoke' as const,
-      timeMs: 3000,
-      durationMs: 2000,
-      travelMs: 1000,
-      note: '',
-      shape: { type: 'circle' as const, center: { x: 0.5, y: 0.5 }, radiusM: 4 },
-    };
-    expect(utilityStateAt(smoke, 2999)).toEqual({ started: false, active: false, progress: 0 });
-    expect(utilityStateAt(smoke, 3500)).toEqual({ started: true, active: true, progress: 0.5 });
-    expect(utilityStateAt(smoke, 5001).active).toBe(false);
-    expect(utilityStateAt({ ...smoke, durationMs: null }, 99999).active).toBe(true);
+  it('utilidades respeitam início, duração e percurso do preset', () => {
+    const base = { id: 'u1', ownerTokenId: null, timeMs: 3000, note: '' };
+    const smoke = { ...base, agentUuid: '8e253930-4c05-31dd-1b6c-968525494517', abilitySlot: 'Ability2', shape: { type: 'circle' as const, center: { x: 0.5, y: 0.5 } } };
+    const { durationMs } = utilityDefinition(smoke).timing;
+    expect(utilityStateAt(smoke, 2999)).toEqual({ started: false, active: false, progress: 0, elapsedMs: 0 });
+    expect(utilityStateAt(smoke, 3500)).toEqual({ started: true, active: true, progress: 1, elapsedMs: 500 });
+    expect(utilityStateAt(smoke, 3000 + durationMs! + 1).active).toBe(false);
+
+    const bolt = { ...base, agentUuid: '320b2a48-4d9b-a075-30f1-1f93a9b638fa', abilitySlot: 'Ability2', shape: { type: 'path' as const, curved: false, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }] } };
+    const { travelMs } = utilityDefinition(bolt).timing;
+    expect(utilityStateAt(bolt, 3000 + travelMs / 2).progress).toBeCloseTo(0.5);
+    expect(utilityPathPoint(bolt, 0.5)).toEqual({ x: 0.5, y: 0 });
+
+    const turret = { ...base, agentUuid: '1e58de9c-4950-5125-93e9-a0aee9f98746', abilitySlot: 'Ability2', shape: { type: 'marker' as const, point: { x: 0.5, y: 0.5 }, facing: null } };
+    expect(utilityStateAt(turret, 999999).active).toBe(true);
   });
 
   it('calcula o fim do conteúdo e formata o tempo', () => {

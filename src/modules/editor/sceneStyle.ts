@@ -1,14 +1,11 @@
 // Regras visuais compartilhadas entre 2D e 3D, para os dois modos mostrarem o mesmo significado.
-import { CATEGORY_COLOR } from '../abilities/taxonomy';
-import type { AbilityCategory, Team } from '../strategy/schema';
+import type { Team } from '../strategy/schema';
 import type { UtilityState } from '../timeline/simulate';
 
 export const TEAM_COLOR: Record<Team, string> = {
   attack: '#ef3b48',
   defense: '#2fc4d6',
 };
-
-export const categoryColor = (category: AbilityCategory): string => CATEGORY_COLOR[category];
 
 /**
  * Parado, tudo fica visível para planejar, com o que ainda não aconteceu em tom apagado.

@@ -1,19 +1,19 @@
 // Controlador único das ferramentas. O 2D e o 3D só informam "ponteiro neste ponto do mapa,
 // sobre este objeto"; toda a regra de edição mora aqui e vale igual nos dois modos.
-import { classifyAbility } from '../abilities/taxonomy';
+import { abilityDefinition } from '../abilities/definitions';
 import { clampToMap, distanceMapUnits, headingBetween, mapUnitsToMeters, type MapPoint } from '../coordinates';
 import { docActions, docStore, type ChangeInput } from '../strategy/docStore';
 import {
   appendWaypoint,
   createAgentToken,
   createUtility,
-  defaultShapeFor,
   faceAgentAt,
   newId,
   placeAgentAt,
   translateDrawing,
   translateUtility,
   updateWaypoint,
+  wallFromGesture,
 } from '../strategy/factory';
 import {
   MAX_AGENTS_PER_TEAM,
@@ -124,26 +124,20 @@ function applyVertex(point: MapPoint, g: Extract<Gesture, { type: 'vertex' }>): 
   const replace = (points: MapPoint[]) => points.map((p, i) => (i === g.index ? target : p));
   if (g.ref.c === 'utilities') {
     const utility = entity as Utility;
-    if (utility.shape.type !== 'wall' && utility.shape.type !== 'path') return;
-    commit({ ...utility, shape: { ...utility.shape, points: replace(utility.shape.points) } } as Utility, 'utilities', g.key);
+    if (utility.shape.type !== 'path') return;
+    commit({ ...utility, shape: { ...utility.shape, points: replace(utility.shape.points) } }, 'utilities', g.key);
   } else if (g.ref.c === 'drawings' && (entity as Drawing).type === 'line') {
     const line = entity as Extract<Drawing, { type: 'line' }>;
     commit({ ...line, points: replace(line.points) }, 'drawings', g.key);
   }
 }
 
+/** Só áreas desenhadas têm raio ajustável. O tamanho das habilidades vem do preset. */
 function applyRadius(point: MapPoint, g: Extract<Gesture, { type: 'radius' }>): void {
   const entity = getEntity(g.ref);
-  if (!entity) return;
-  const toRadius = (center: MapPoint) => Math.max(0.5, mapUnitsToMeters(distanceMapUnits(center, point), frame()));
-  if (g.ref.c === 'utilities') {
-    const utility = entity as Utility;
-    if (utility.shape.type !== 'circle') return;
-    commit({ ...utility, shape: { ...utility.shape, radiusM: toRadius(utility.shape.center) } }, 'utilities', g.key);
-  } else if ((entity as Drawing).type === 'area') {
-    const area = entity as Extract<Drawing, { type: 'area' }>;
-    commit({ ...area, radiusM: toRadius(area.center) }, 'drawings', g.key);
-  }
+  if (!entity || g.ref.c !== 'drawings' || (entity as Drawing).type !== 'area') return;
+  const area = entity as Extract<Drawing, { type: 'area' }>;
+  commit({ ...area, radiusM: Math.max(0.5, mapUnitsToMeters(distanceMapUnits(area.center, point), frame())) }, 'drawings', g.key);
 }
 
 function applyRotate(point: MapPoint, g: Extract<Gesture, { type: 'rotate' }>): void {
@@ -155,8 +149,11 @@ function applyRotate(point: MapPoint, g: Extract<Gesture, { type: 'rotate' }>): 
     commit(faceAgentAt(agent, headingBetween(center, point), now(), frame()), 'agents', g.key);
   } else if (g.ref.c === 'utilities') {
     const utility = entity as Utility;
-    if (utility.shape.type !== 'marker') return;
-    commit({ ...utility, shape: { ...utility.shape, facing: headingBetween(utility.shape.point, point) } }, 'utilities', g.key);
+    if (utility.shape.type === 'marker') {
+      commit({ ...utility, shape: { ...utility.shape, facing: headingBetween(utility.shape.point, point) } }, 'utilities', g.key);
+    } else if (utility.shape.type === 'wall') {
+      commit({ ...utility, shape: { ...utility.shape, facing: headingBetween(utility.shape.center, point) } }, 'utilities', g.key);
+    }
   }
 }
 
@@ -194,24 +191,21 @@ function placeUtility(shape: UtilityShape): void {
 function finishUtilityDraft(endPoint: MapPoint | null): void {
   const { draft, pendingUtility } = editorStore.getState();
   if (!draft || !pendingUtility) return;
-  const { category } = classifyAbility(pendingUtility.agentUuid, pendingUtility.slot);
+  const definition = abilityDefinition(pendingUtility.agentUuid, pendingUtility.slot);
   const start = draft.points[0]!;
   const end = endPoint ?? draft.cursor ?? start;
   const dragged = distanceMapUnits(start, end) >= MIN_DRAG_UNITS;
   switch (pendingUtility.shape) {
-    case 'circle': {
-      const base = defaultShapeFor('circle', category, start, frame());
-      placeUtility(dragged && base.type === 'circle' ? { ...base, radiusM: Math.max(0.5, mapUnitsToMeters(distanceMapUnits(start, end), frame())) } : base);
+    case 'circle':
+      // Arrastar só reposiciona: o raio é sempre o do preset.
+      placeUtility({ type: 'circle', center: end });
       break;
-    }
     case 'marker':
       placeUtility({ type: 'marker', point: start, facing: dragged ? headingBetween(start, end) : null });
       break;
-    case 'wall': {
-      const base = defaultShapeFor('wall', category, start, frame());
-      placeUtility(dragged && base.type === 'wall' ? { ...base, points: [start, end] } : base);
+    case 'wall':
+      placeUtility(wallFromGesture(start, dragged ? end : null, definition.size.lengthM, frame()));
       break;
-    }
     case 'path': {
       if (draft.points.length < 2) {
         toast.info('Adicione pelo menos dois pontos à trajetória.');
@@ -333,7 +327,9 @@ export const interaction = {
           });
           return true;
         }
-        setEditor({ draft: { kind: 'utility', shape: pending.shape, points: [point], cursor: point } });
+        const { size } = abilityDefinition(pending.agentUuid, pending.slot);
+        const previewM = pending.shape === 'circle' ? size.radiusM : pending.shape === 'wall' ? size.lengthM : undefined;
+        setEditor({ draft: { kind: 'utility', shape: pending.shape, points: [point], cursor: point, previewM } });
         gesture = { type: 'draft', start: point };
         return true;
       }
@@ -456,10 +452,9 @@ export function armAgent(agentUuid: string, team: Team): void {
 }
 
 export function armUtility(agentUuid: string, slot: string, ownerTokenId: string | null): void {
-  const { shape } = classifyAbility(agentUuid, slot);
   setEditor({
     tool: 'utility',
-    pendingUtility: { agentUuid, slot, ownerTokenId, shape },
+    pendingUtility: { agentUuid, slot, ownerTokenId, shape: abilityDefinition(agentUuid, slot).placement },
     pendingAgent: null,
     draft: null,
   });

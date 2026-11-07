@@ -1,16 +1,17 @@
 // Simulação determinística: o estado em qualquer instante é função pura de (documento, tempo).
 // Não há integração passo a passo, então avançar, retroceder ou pular dá sempre o mesmo resultado.
+import { utilityPathPoint, utilityStateAt, utilityTravelEndMs, type UtilityState } from '../abilities/timeline';
 import {
   distanceMeters,
   headingBetween,
   lerpAngle,
   lerpPoint,
-  pointAlongPolyline,
-  smoothPolyline,
   type MapFrame,
   type MapPoint,
 } from '../coordinates';
-import type { AgentToken, StrategyDoc, Utility } from '../strategy/schema';
+import type { AgentToken, StrategyDoc } from '../strategy/schema';
+
+export { utilityPathPoint, utilityStateAt, type UtilityState };
 
 const TURN_MS = 180;
 
@@ -39,13 +40,6 @@ export interface AgentPose {
   point: MapPoint;
   facing: number;
   moving: boolean;
-}
-
-export interface UtilityState {
-  started: boolean;
-  active: boolean;
-  /** Avanço [0, 1] do percurso. */
-  progress: number;
 }
 
 const routeCache = new WeakMap<AgentToken, { worldMeters: number; compiled: CompiledRoute }>();
@@ -138,15 +132,6 @@ export function agentPoseAt(agent: AgentToken, tMs: number, frame: MapFrame): Ag
   return { point: compiled.segments[compiled.segments.length - 1]!.to, facing, moving: false };
 }
 
-export function utilityStateAt(utility: Utility, tMs: number): UtilityState {
-  const started = tMs >= utility.timeMs;
-  if (!started) return { started: false, active: false, progress: 0 };
-  const elapsed = tMs - utility.timeMs;
-  const active = utility.durationMs === null || elapsed <= utility.durationMs;
-  const progress = utility.travelMs <= 0 ? 1 : Math.min(1, elapsed / utility.travelMs);
-  return { started, active, progress };
-}
-
 export interface SimulationState {
   timeMs: number;
   agents: Record<string, AgentPose>;
@@ -161,13 +146,6 @@ export function simulate(doc: StrategyDoc, tMs: number, frame: MapFrame): Simula
   return { timeMs: tMs, agents, utilities };
 }
 
-/** Ponto onde a utilidade está em um percurso (projétil, drone, dash). */
-export function utilityPathPoint(utility: Utility, progress: number): MapPoint | null {
-  if (utility.shape.type !== 'path') return null;
-  const points = utility.shape.curved ? smoothPolyline(utility.shape.points) : utility.shape.points;
-  return pointAlongPolyline(points, progress);
-}
-
 /** Último instante com algo acontecendo; serve para sugerir a duração da timeline. */
 export function contentEndMs(doc: StrategyDoc, frame: MapFrame): number {
   let end = 0;
@@ -175,7 +153,7 @@ export function contentEndMs(doc: StrategyDoc, frame: MapFrame): number {
     if (agent.route?.waypoints.length) end = Math.max(end, compileRoute(agent, frame).endMs);
   }
   for (const utility of Object.values(doc.utilities)) {
-    end = Math.max(end, utility.timeMs + Math.max(utility.durationMs ?? 0, utility.travelMs));
+    end = Math.max(end, utilityTravelEndMs(utility));
   }
   for (const note of Object.values(doc.notes)) end = Math.max(end, note.timeMs);
   return end;

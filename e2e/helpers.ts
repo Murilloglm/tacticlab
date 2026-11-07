@@ -70,7 +70,7 @@ export interface SavedDoc {
   folderId: string | null;
   durationMs: number;
   agents: Record<string, { agentUuid: string; team: string; position: { x: number; y: number }; facing: number; route: { startMs: number; speedMps: number; waypoints: Array<{ id: string; point: { x: number; y: number }; pauseMs: number; arriveAtMs: number | null }> } | null }>;
-  utilities: Record<string, { category: string; timeMs: number; durationMs: number | null; shape: { type: string; radiusM?: number; points?: unknown[] } }>;
+  utilities: Record<string, { timeMs: number; shape: { type: string; center?: { x: number; y: number }; facing?: number | null; points?: unknown[] } }>;
   drawings: Record<string, { type: string; text?: string; arrow?: boolean; label?: string }>;
   notes: Record<string, { timeMs: number; text: string }>;
 }
@@ -124,6 +124,20 @@ export async function cameraPosition(page: Page): Promise<{ x: number; y: number
   const el = page.getByTestId('camera-position');
   const read = async (name: string) => Number(await el.getAttribute(name));
   return { x: await read('data-x'), y: await read('data-y'), z: await read('data-z'), yaw: await read('data-yaw') };
+}
+
+export interface SceneItem {
+  type: 'agent' | 'ability' | 'scenario';
+  id?: string;
+  x: number;
+  z: number;
+  yaw: number;
+  [key: string]: unknown;
+}
+
+/** O que está de fato na cena 3D, lido do grafo de objetos. */
+export async function sceneItems(page: Page): Promise<SceneItem[]> {
+  return JSON.parse((await page.getByTestId('scene-manifest').getAttribute('data-items')) ?? '[]') as SceneItem[];
 }
 
 export async function timelineMs(page: Page): Promise<number> {

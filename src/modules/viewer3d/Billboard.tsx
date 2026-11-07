@@ -23,6 +23,7 @@ interface BillboardProps {
 }
 
 const noRaycast = () => null;
+const NEAR_DISTANCE = 14;
 
 export function Billboard({ point, lift, size, texture, opacity = 1, growFrom = 26, onPointerDown, renderOrder = 10, anchorY = 0.5 }: BillboardProps) {
   const sprite = useRef<Sprite>(null);
@@ -37,7 +38,9 @@ export function Billboard({ point, lift, size, texture, opacity = 1, growFrom = 
     const current = sprite.current;
     if (!current) return;
     const distance = camera.position.distanceTo(current.position);
-    const scale = size * Math.max(1, distance / growFrom);
+    // De perto encolhe junto com a distância, para um rótulo não cobrir a tela na câmera fantasma.
+    const factor = distance < NEAR_DISTANCE ? Math.max(0.1, distance / NEAR_DISTANCE) : Math.max(1, distance / growFrom);
+    const scale = size * factor;
     current.scale.set(scale * aspect, scale, 1);
   });
 

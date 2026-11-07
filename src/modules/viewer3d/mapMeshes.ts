@@ -2,7 +2,8 @@
 // Materiais simples e uma única geometria por classe mantêm o cenário leve no celular.
 import { BufferAttribute, BufferGeometry, Color, ShapeUtils, Vector2 } from 'three';
 import type { MapFrame, MapPoint } from '../coordinates';
-import type { HeightField, MapGeometry } from '../maps/geometry';
+import { pointInRing, type HeightField, type MapGeometry } from '../maps/geometry';
+import type { TacticalRamp, TacticalSolid, TacticalZone } from '../maps/tactical/types';
 
 /** Alturas esquemáticas, em metros. Não vêm do jogo; servem para dar leitura ao volume. */
 export const SCHEMATIC_HEIGHTS = { wall: 4.5, rail: 1.1, box: 1.8 };
@@ -10,19 +11,6 @@ export const SCHEMATIC_HEIGHTS = { wall: 4.5, rail: 1.1, box: 1.8 };
 const FLOOR_LOW = new Color('#3a3f47');
 const FLOOR_HIGH = new Color('#9aa1ad');
 const SITE_TINT = new Color('#a2383f');
-
-function pointInRing(x: number, y: number, ring: number[]): boolean {
-  let inside = false;
-  const n = ring.length / 2;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = ring[i * 2]!;
-    const yi = ring[i * 2 + 1]!;
-    const xj = ring[j * 2]!;
-    const yj = ring[j * 2 + 1]!;
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
 
 function pointInPolygon(x: number, y: number, polygon: number[][]): boolean {
   const [outer, ...holes] = polygon;
@@ -35,7 +23,8 @@ function isSitePoint(geometry: MapGeometry, x: number, y: number): boolean {
 }
 
 /** Piso em grade, com cor por altura e tom próprio nos sites. */
-export function buildFloorGeometry(geometry: MapGeometry, heights: HeightField, frame: MapFrame): BufferGeometry {
+export function buildFloorGeometry(geometry: MapGeometry, heights: HeightField, frame: MapFrame, zones: TacticalZone[] = []): BufferGeometry {
+  const zoneColor = new Color();
   const G = heights.size;
   const S = frame.worldMeters;
   const span = Math.max(geometry.heightSpanMeters, 3);
@@ -73,6 +62,9 @@ export function buildFloorGeometry(geometry: MapGeometry, heights: HeightField, 
     uvs.push(x, 1 - y);
     color.copy(FLOOR_LOW).lerp(FLOOR_HIGH, Math.min(1, height / span));
     if (isSitePoint(geometry, x, y)) color.lerp(SITE_TINT, 0.55);
+    for (const zone of zones) {
+      if (pointInRing(x, y, zone.ring)) color.lerp(zoneColor.set(zone.color), zone.strength);
+    }
     colors.push(color.r, color.g, color.b);
     const index = positions.length / 3 - 1;
     vertexIndex[key] = index;
@@ -157,6 +149,172 @@ export function buildExtrudedGeometry(
     }
   }
 
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.computeVertexNormals();
+  return result;
+}
+
+/** Sombreia as faces pela altura relativa ao piso: base escura, topo claro. Dá leitura de volume sem textura. */
+export function shadeByHeight(geometry: BufferGeometry, heights: HeightField, frame: MapFrame, extrude: number, base: string, top: string, cap: string): BufferGeometry {
+  const S = frame.worldMeters;
+  const positions = geometry.getAttribute('position');
+  const colors = new Float32Array(positions.count * 3);
+  const low = new Color(base);
+  const high = new Color(top);
+  const roof = new Color(cap);
+  const paint = new Color();
+  const above = (i: number) => positions.getY(i) - heights.heightAt({ x: positions.getX(i) / S + 0.5, y: positions.getZ(i) / S + 0.5 });
+  for (let i = 0; i < positions.count; i += 3) {
+    // Um triângulo com os três vértices no topo é a cobertura do volume.
+    const isRoof = above(i) > extrude * 0.95 && above(i + 1) > extrude * 0.95 && above(i + 2) > extrude * 0.95;
+    for (let k = 0; k < 3; k++) {
+      if (isRoof) paint.copy(roof);
+      else paint.copy(low).lerp(high, Math.min(1, Math.max(0, above(i + k) / extrude)));
+      colors.set([paint.r, paint.g, paint.b], (i + k) * 3);
+    }
+  }
+  geometry.setAttribute('color', new BufferAttribute(colors, 3));
+  return geometry;
+}
+
+/**
+ * Cobre os vazios cercados por parede para aparecerem como massa construída, e não como buracos.
+ * Só tampa o anel interno que não contém piso. O anel que contorna a área jogável fica aberto.
+ */
+export function buildVoidCaps(polygons: number[][][], heights: HeightField, frame: MapFrame, extrude: number): BufferGeometry {
+  const S = frame.worldMeters;
+  const G = heights.size;
+  const positions: number[] = [];
+  for (const polygon of polygons) {
+    for (const hole of polygon.slice(1)) {
+      if (hole.length < 6) continue;
+      const contour = ringToVectors(hole);
+      const faces = ShapeUtils.triangulateShape(contour, []);
+      let floorHits = 0;
+      for (const face of faces) {
+        const a = contour[face[0]!]!;
+        const b = contour[face[1]!]!;
+        const c = contour[face[2]!]!;
+        if (heights.isFloorCell(Math.floor(((a.x + b.x + c.x) / 3) * G), Math.floor(((a.y + b.y + c.y) / 3) * G))) floorHits++;
+      }
+      if (faces.length === 0 || floorHits > faces.length * 0.25) continue;
+      const verts = contour.map((p) => ({ x: (p.x - 0.5) * S, y: heights.heightAt({ x: p.x, y: p.y }) + extrude, z: (p.y - 0.5) * S }));
+      // Laje plana na altura da parede mais alta em volta. O relevo sob o vazio não tem significado.
+      const roofY = verts.reduce((max, vertex) => Math.max(max, vertex.y), -Infinity);
+      for (const face of faces) {
+        const va = verts[face[0]!]!;
+        const vb = verts[face[1]!]!;
+        const vc = verts[face[2]!]!;
+        const cross = (vb.x - va.x) * (vc.z - va.z) - (vb.z - va.z) * (vc.x - va.x);
+        const [p, q, r] = cross < 0 ? [va, vb, vc] : [va, vc, vb];
+        positions.push(p.x, roofY, p.z, q.x, roofY, q.z, r.x, roofY, r.z);
+      }
+      // Fecha o espaço entre o topo de cada parede e a laje.
+      for (let i = 0; i < verts.length; i++) {
+        const a = verts[i]!;
+        const b = verts[(i + 1) % verts.length]!;
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z, b.x, roofY, b.z, a.x, a.y, a.z, b.x, roofY, b.z, a.x, roofY, a.z);
+      }
+    }
+  }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.computeVertexNormals();
+  return result;
+}
+
+const SOLID_COLORS: Record<TacticalSolid['kind'], { side: string; top: string }> = {
+  crate: { side: '#a98a5e', top: '#d0b488' },
+  cover: { side: '#7f8a97', top: '#a8b3bf' },
+  barrier: { side: '#8fa3ad', top: '#c4d2d9' },
+  pillar: { side: '#8d939c', top: '#bcc2ca' },
+  structure: { side: '#555c66', top: '#7b838e' },
+  door: { side: '#d29a3a', top: '#efc06a' },
+};
+
+/** Coberturas do layout em uma única malha: topo plano na altura do piso sob o centro de cada uma. */
+export function buildSolidsGeometry(solids: TacticalSolid[], heights: HeightField, frame: MapFrame): BufferGeometry {
+  const S = frame.worldMeters;
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const side = new Color();
+  const top = new Color();
+  const emit = (color: Color, ...vertices: Array<[number, number, number]>) => {
+    for (const [x, y, z] of vertices) {
+      positions.push(x, y, z);
+      colors.push(color.r, color.g, color.b);
+    }
+  };
+  for (const solid of solids) {
+    const contour = ringToVectors(solid.ring);
+    if (contour.length < 3) continue;
+    const center = contour.reduce((sum, p) => ({ x: sum.x + p.x / contour.length, y: sum.y + p.y / contour.length }), { x: 0, y: 0 });
+    const base = heights.heightAt(center);
+    const roofY = base + solid.heightM;
+    const floorY = base - 0.4;
+    const palette = SOLID_COLORS[solid.kind];
+    side.set(palette.side);
+    top.set(palette.top);
+    const at = contour.map((p) => ({ x: (p.x - 0.5) * S, z: (p.y - 0.5) * S }));
+    for (const face of ShapeUtils.triangulateShape(contour, [])) {
+      const a = at[face[0]!]!;
+      const b = at[face[1]!]!;
+      const c = at[face[2]!]!;
+      const cross = (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x);
+      const [p, q, r] = cross < 0 ? [a, b, c] : [a, c, b];
+      emit(top, [p.x, roofY, p.z], [q.x, roofY, q.z], [r.x, roofY, r.z]);
+    }
+    for (let i = 0; i < at.length; i++) {
+      const a = at[i]!;
+      const b = at[(i + 1) % at.length]!;
+      emit(side, [a.x, floorY, a.z], [b.x, floorY, b.z], [b.x, roofY, b.z], [a.x, floorY, a.z], [b.x, roofY, b.z], [a.x, roofY, a.z]);
+    }
+  }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
+  result.computeVertexNormals();
+  return result;
+}
+
+/** Faixas transversais sobre as rampas, para o desnível ser reconhecido de qualquer ângulo. */
+export function buildRampStripes(ramps: TacticalRamp[], heights: HeightField, frame: MapFrame, spacingM = 1.8, widthM = 0.45): BufferGeometry {
+  const S = frame.worldMeters;
+  const positions: number[] = [];
+  const lift = 0.06;
+  const vertex = (x: number, y: number) => {
+    positions.push((x - 0.5) * S, heights.heightAt({ x, y }) + lift, (y - 0.5) * S);
+  };
+  for (const ramp of ramps) {
+    const dx = ramp.to.x - ramp.from.x;
+    const dy = ramp.to.y - ramp.from.y;
+    const length = Math.hypot(dx, dy);
+    if (length === 0) continue;
+    const ux = dx / length;
+    const uy = dy / length;
+    // Largura da rampa: projeção do contorno na perpendicular à direção de subida.
+    let min = Infinity;
+    let max = -Infinity;
+    for (const p of ringToVectors(ramp.ring)) {
+      const across = -(p.x - ramp.from.x) * uy + (p.y - ramp.from.y) * ux;
+      min = Math.min(min, across);
+      max = Math.max(max, across);
+    }
+    const steps = Math.floor((length * S) / spacingM);
+    const half = widthM / S / 2;
+    for (let i = 1; i < steps; i++) {
+      const along = (i / steps) * length;
+      const ox = ramp.from.x + ux * along;
+      const oy = ramp.from.y + uy * along;
+      const corner = (across: number, offset: number): [number, number] => [ox - uy * across + ux * offset, oy + ux * across + uy * offset];
+      const a = corner(min, -half);
+      const b = corner(max, -half);
+      const c = corner(max, half);
+      const d = corner(min, half);
+      for (const [x, y] of [a, b, c, a, c, d]) vertex(x, y);
+    }
+  }
   const result = new BufferGeometry();
   result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   result.computeVertexNormals();
@@ -254,6 +412,16 @@ export function buildRibbon(points: MapPoint[], heightM: number, frame: MapFrame
   result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   result.computeVertexNormals();
   return result;
+}
+
+/** Polilinha acima do relevo com um arco, que sobe até `arcM` no meio do percurso. */
+export function arcedPolyline(points: MapPoint[], frame: MapFrame, heights: HeightField | null, lift: number, arcM: number): Array<[number, number, number]> {
+  const base = polylineOverTerrain(points, frame, heights, lift);
+  if (arcM <= 0 || base.length < 2) return base;
+  return base.map(([x, y, z], index) => {
+    const t = index / (base.length - 1);
+    return [x, y + arcM * 4 * t * (1 - t), z];
+  });
 }
 
 /** Amostra uma polilinha sobre o relevo, subdividindo trechos longos para não cortar rampas. */

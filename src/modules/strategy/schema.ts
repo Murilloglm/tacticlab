@@ -2,7 +2,7 @@
 // Todo JSON externo (importação, link, sala, banco) passa por estes esquemas antes de entrar no app.
 import { z } from 'zod';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const MAX_AGENTS_PER_TEAM = 5;
 
 const finite = z.number().finite();
@@ -56,28 +56,50 @@ export const abilityCategorySchema = z.enum([
   'other',
 ]);
 
+// A instância guarda só o que o usuário decide: posição, direção, trajetória e instante.
+// Tamanho, duração e aparência vêm da definição canônica da habilidade.
 export const utilityShapeSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('circle'), center: pointSchema, radiusM: finite.positive() }),
-  z.object({ type: z.literal('wall'), points: z.array(pointSchema).min(2).max(32), thicknessM: finite.positive() }),
+  z.object({ type: z.literal('circle'), center: pointSchema }),
+  z.object({ type: z.literal('wall'), center: pointSchema, facing: finite }),
   z.object({ type: z.literal('path'), points: z.array(pointSchema).min(2).max(64), curved: z.boolean() }),
   z.object({ type: z.literal('marker'), point: pointSchema, facing: finite.nullable() }),
 ]);
 
-export const utilitySchema = z.object({
-  id,
-  agentUuid: z.string().min(1),
-  abilitySlot: z.string().min(1).max(32),
-  ownerTokenId: id.nullable(),
-  category: abilityCategorySchema,
-  /** Instante em que aparece na simulação. */
-  timeMs: nonNegative,
-  /** Tempo visível definido pelo usuário. Nulo: fica até o fim. */
-  durationMs: nonNegative.nullable(),
-  /** Tempo de percurso em trajetórias. */
-  travelMs: nonNegative,
-  note: z.string().max(280),
-  shape: utilityShapeSchema,
-});
+/**
+ * Até a versão 1, cada habilidade guardava tamanho e tempos próprios, e a parede era uma polilinha.
+ * Vale em todas as entradas (arquivo, link, banco, histórico e operações de sala).
+ */
+function migrateLegacyUtility(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null) return input;
+  const legacy = input as { shape?: { type?: unknown; points?: unknown } };
+  const shape = legacy.shape;
+  if (shape?.type !== 'wall' || !Array.isArray(shape.points) || shape.points.length < 2) return input;
+  const first = shape.points[0] as { x?: unknown; y?: unknown };
+  const last = shape.points[shape.points.length - 1] as { x?: unknown; y?: unknown };
+  if (typeof first?.x !== 'number' || typeof first.y !== 'number' || typeof last?.x !== 'number' || typeof last.y !== 'number') return input;
+  return {
+    ...input,
+    shape: {
+      type: 'wall',
+      center: { x: (first.x + last.x) / 2, y: (first.y + last.y) / 2 },
+      facing: Math.atan2(last.y - first.y, last.x - first.x),
+    },
+  };
+}
+
+export const utilitySchema = z.preprocess(
+  migrateLegacyUtility,
+  z.object({
+    id,
+    agentUuid: z.string().min(1),
+    abilitySlot: z.string().min(1).max(32),
+    ownerTokenId: id.nullable(),
+    /** Instante em que aparece na simulação. */
+    timeMs: nonNegative,
+    note: z.string().max(280),
+    shape: utilityShapeSchema,
+  }),
+);
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
@@ -99,7 +121,8 @@ export const drawingSchema = z.discriminatedUnion('type', [
 export const noteSchema = z.object({ id, timeMs: nonNegative, text: z.string().max(280) });
 
 export const strategyDocSchema = z.object({
-  schemaVersion: z.literal(SCHEMA_VERSION),
+  // A versão 1 é convertida pelos esquemas das entidades e sai salva como a atual.
+  schemaVersion: z.union([z.literal(1), z.literal(SCHEMA_VERSION)]).transform((): typeof SCHEMA_VERSION => SCHEMA_VERSION),
   id,
   name: z.string().min(1).max(120),
   mapId: z.string().min(1),

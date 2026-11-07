@@ -9,7 +9,8 @@ import { interaction } from '../editor/interaction';
 import { useDoc } from '../strategy/docStore';
 import { ignoreSceneEvent, syncOrbitEnabled } from '../ghostcam/CameraRig';
 import { labelTexture } from './labels';
-import { buildExtrudedGeometry, buildFloorGeometry, polylineOverTerrain, SCHEMATIC_HEIGHTS } from './mapMeshes';
+import { polylineOverTerrain } from './mapMeshes';
+import { buildScenario, disposeScenario } from './scenario';
 import { Billboard } from './Billboard';
 
 function useMinimapTexture(url: string | undefined, enabled: boolean): Texture | null {
@@ -47,25 +48,10 @@ export function MapModel() {
   const mapInfo = mapId ? findMap(catalog, mapId) : undefined;
   const floorTexture = useMinimapTexture(mapInfo?.displayIcon, minimapOnFloor);
 
-  const meshes = useMemo(() => {
-    if (!map) return null;
-    return {
-      floor: buildFloorGeometry(map.geometry, map.heights, frame),
-      walls: buildExtrudedGeometry(map.geometry.walls, map.heights, frame, SCHEMATIC_HEIGHTS.wall),
-      rails: buildExtrudedGeometry(map.geometry.rails, map.heights, frame, SCHEMATIC_HEIGHTS.rail),
-      boxes: buildExtrudedGeometry(map.geometry.boxes, map.heights, frame, SCHEMATIC_HEIGHTS.box),
-    };
-  }, [map, frame]);
-
-  useEffect(
-    () => () => {
-      meshes?.floor.dispose();
-      meshes?.walls.dispose();
-      meshes?.rails.dispose();
-      meshes?.boxes.dispose();
-    },
-    [meshes],
-  );
+  const scenario = useMemo(() => (map ? buildScenario(map) : null), [map]);
+  useEffect(() => () => {
+    if (scenario) disposeScenario(scenario);
+  }, [scenario]);
 
   const siteOutlines = useMemo(() => {
     if (!map) return [];
@@ -83,7 +69,7 @@ export function MapModel() {
     return lines;
   }, [map, frame]);
 
-  if (!map || !meshes) return null;
+  if (!map || !scenario) return null;
 
   const onDown = (event: ThreeEvent<PointerEvent>) => {
     if (event.button !== 0 || ignoreSceneEvent(event.nativeEvent.pointerType)) return;
@@ -94,30 +80,55 @@ export function MapModel() {
   };
 
   return (
-    <group onPointerDown={onDown}>
-      <mesh geometry={meshes.floor} name="floor">
+    <group onPointerDown={onDown} userData={{ tactical: { type: 'scenario', detail: scenario.detail, solids: scenario.stats.solids, ramps: scenario.stats.ramps } }}>
+      <mesh geometry={scenario.floor} name="floor">
         {floorTexture ? (
           <meshLambertMaterial key="textured" map={floorTexture} transparent alphaTest={0.05} color="#ffffff" />
         ) : (
           <meshLambertMaterial key="plain" vertexColors side={DoubleSide} />
         )}
       </mesh>
-      <mesh geometry={meshes.walls} name="walls">
-        <meshLambertMaterial key={String(xray)} color="#262a31" side={DoubleSide} transparent={xray} opacity={xray ? 0.22 : 1} depthWrite={!xray} />
-      </mesh>
-      <mesh geometry={meshes.rails} name="rails">
-        <meshLambertMaterial color="#7a818c" side={DoubleSide} />
-      </mesh>
-      <mesh geometry={meshes.boxes} name="boxes">
-        <meshLambertMaterial color="#5b6470" side={DoubleSide} />
-      </mesh>
+      {scenario.detail === 'tactical' ? (
+        <mesh geometry={scenario.walls} name="walls">
+          <meshLambertMaterial key={String(xray)} vertexColors side={DoubleSide} transparent={xray} opacity={xray ? 0.22 : 1} depthWrite={!xray} />
+        </mesh>
+      ) : (
+        <mesh geometry={scenario.walls} name="walls">
+          <meshLambertMaterial key={String(xray)} color="#262a31" side={DoubleSide} transparent={xray} opacity={xray ? 0.22 : 1} depthWrite={!xray} />
+        </mesh>
+      )}
+      {scenario.rails && (
+        <mesh geometry={scenario.rails} name="rails">
+          <meshLambertMaterial color="#7a818c" side={DoubleSide} />
+        </mesh>
+      )}
+      {scenario.boxes && (
+        <mesh geometry={scenario.boxes} name="boxes">
+          <meshLambertMaterial color="#5b6470" side={DoubleSide} />
+        </mesh>
+      )}
+      {scenario.solids && (
+        <mesh geometry={scenario.solids} name="tactical-solids">
+          <meshLambertMaterial vertexColors side={DoubleSide} />
+        </mesh>
+      )}
+      {scenario.rampStripes && (
+        <mesh geometry={scenario.rampStripes} name="ramp-stripes" raycast={() => null}>
+          <meshBasicMaterial color="#e8d9a8" side={DoubleSide} transparent opacity={0.34} depthWrite={false} />
+        </mesh>
+      )}
+      {scenario.edges && !xray && (
+        <lineSegments geometry={scenario.edges} name="scenario-edges" raycast={() => null}>
+          <lineBasicMaterial color="#14161a" transparent opacity={0.55} />
+        </lineSegments>
+      )}
 
       {siteOutlines.map((points, index) => (
         <Line key={index} points={points} color="#ef3b48" lineWidth={2} raycast={() => null} />
       ))}
 
       {map.geometry.sites.map((site) => (
-        <Billboard key={site.label} point={site.center} lift={5.5} size={3} growFrom={50} texture={labelTexture(site.label, { weight: 800, color: '#ffffff', background: '#ef3b48' })} />
+        <Billboard key={site.label} point={site.center} lift={scenario.detail === 'tactical' ? 11 : 5.5} size={scenario.detail === 'tactical' ? 1.5 : 3} growFrom={50} texture={labelTexture(site.label, { weight: 800, color: '#ffffff', background: '#ef3b48' })} />
       ))}
 
       {showCallouts &&

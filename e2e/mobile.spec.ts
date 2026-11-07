@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boardPoint, cameraPosition, createStrategy, savedDoc, singleAgent, stubNetwork, to3D } from './helpers';
+import { boardPoint, cameraPosition, createStrategy, savedDoc, sceneItems, singleAgent, stubNetwork, to3D, trackErrors } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await stubNetwork(page);
@@ -153,6 +153,31 @@ test('pinça dá zoom e um dedo move a visão na prancha', async ({ page }) => {
   await touch('touchMove', [[cx + 80, cy]]);
   await touch('touchEnd', []);
   await expect.poll(offset).toBeGreaterThan(before + 40);
+});
+
+test('no celular, o 3D mostra bonecos e habilidades em 3D sem erros', async ({ page }) => {
+  const errors = trackErrors(page);
+  await createStrategy(page);
+  await page.getByTestId('toggle-panel').click();
+  await page.getByTestId('agent-Sage').click();
+  await page.getByRole('button', { name: 'Recolher painel' }).first().click();
+  const point = await boardPoint(page, 0.5, 0.48);
+  await page.touchscreen.tap(point.x, point.y);
+  await expect(page.getByTestId('agents-count')).toHaveText('1');
+  await page.getByTestId('toggle-panel').click();
+  await page.getByTestId('tab-abilities').click();
+  await page.getByTestId('ability-Grenade').click();
+  await page.getByRole('button', { name: 'Recolher painel' }).first().click();
+  const wallPoint = await boardPoint(page, 0.45, 0.2);
+  await page.touchscreen.tap(wallPoint.x, wallPoint.y);
+  await page.getByRole('button', { name: 'Recolher painel' }).first().click({ timeout: 2000 }).catch(() => undefined);
+  await to3D(page);
+  await expect.poll(async () => (await sceneItems(page)).map((item) => item.type).sort()).toEqual(['ability', 'agent', 'scenario']);
+  const all = await sceneItems(page);
+  expect(all.find((item) => item.type === 'agent')).toMatchObject({ model: 'mannequin' });
+  expect(all.find((item) => item.type === 'ability')).toMatchObject({ render: 'wall-solid' });
+  expect(all.find((item) => item.type === 'scenario')).toMatchObject({ detail: 'tactical' });
+  expect(errors).toEqual([]);
 });
 
 test('a câmera fantasma tem joystick, área de olhar e botões de altura', async ({ page }) => {

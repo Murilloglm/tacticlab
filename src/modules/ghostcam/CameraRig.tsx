@@ -4,7 +4,7 @@ import { OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Vector3 } from 'three';
 import { isTextEntry } from '../../ui/dom';
-import { mapToWorld } from '../coordinates';
+import { mapToWorld, worldToMap } from '../coordinates';
 import { docStore } from '../strategy/docStore';
 import { editorStore, setEditor, useEditor } from '../editor/editorStore';
 import { interaction } from '../editor/interaction';
@@ -51,6 +51,34 @@ function tokenWorld(tokenId: string): Vector3 | null {
   const point = agentPoseAt(token, playbackStore.getState().timeMs, frame).point;
   const [x, y, z] = mapToWorld(point, frame, map?.heights.heightAt(point) ?? 0);
   return new Vector3(x, y, z);
+}
+
+/**
+ * Foca no agente a partir de um ângulo com a câmera sobre o piso e sem parede no caminho.
+ * Atrás do agente pode haver uma massa construída, e de dentro dela não se veria nada.
+ */
+function focusFromOpenFloor(state: GhostState, target: Vector3): GhostState {
+  const { frame, map } = editorStore.getState();
+  const destination = { x: target.x, y: target.y, z: target.z };
+  const first = focusGhost(state, destination);
+  if (!map) return first;
+  const size = map.heights.size;
+  const clearView = (candidate: GhostState) => {
+    const samples = 8;
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const x = candidate.position.x + (target.x - candidate.position.x) * t;
+      const z = candidate.position.z + (target.z - candidate.position.z) * t;
+      const point = worldToMap(x, z, frame);
+      if (!map.heights.isFloorCell(Math.floor(point.x * size), Math.floor(point.y * size))) return false;
+    }
+    return true;
+  };
+  for (let step = 0; step < 8; step++) {
+    const candidate = focusGhost({ ...state, yaw: state.yaw + (step * Math.PI) / 4 }, destination);
+    if (clearView(candidate)) return candidate;
+  }
+  return first;
 }
 
 function publishHud(position: { x: number; y: number; z: number }, yaw: number, pitch: number): void {
@@ -153,7 +181,7 @@ function GhostController() {
         const command = current.command;
         if (!command || command === previous.command || command.type !== 'focus') return;
         const target = tokenWorld(command.tokenId);
-        if (target) state.current = focusGhost(state.current, { x: target.x, y: target.y, z: target.z });
+        if (target) state.current = focusFromOpenFloor(state.current, target);
       }),
     [],
   );

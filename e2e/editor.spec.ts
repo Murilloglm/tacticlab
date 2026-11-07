@@ -10,6 +10,7 @@ import {
   positionText,
   readSaved,
   savedDoc,
+  sceneItems,
   seekTimeline,
   singleAgent,
   stubNetwork,
@@ -280,7 +281,7 @@ test.describe('alternância 2D e 3D', () => {
     await page.mouse.click(cx, cy);
     const start = singleAgent(await savedDoc(page, id)).position;
 
-    // O retrato fica um pouco acima do ponto no piso.
+    // O corpo do boneco fica um pouco acima do ponto no piso.
     await page.waitForTimeout(300);
     await page.mouse.move(cx, cy - 12);
     await page.mouse.down();
@@ -432,19 +433,45 @@ test.describe('câmera fantasma', () => {
 });
 
 test.describe('habilidades', () => {
-  test('lista dados do agente, posiciona e edita com aviso de valores não oficiais', async ({ page }) => {
+  test('posiciona com preset fixo: não há como editar tamanho nem duração', async ({ page }) => {
     const id = await createStrategy(page);
     await placeAgent(page, 'Brimstone', 'attack', 0.5, 0.5);
     await page.getByTestId('tab-abilities').click();
     await page.getByTestId('ability-Ability2').click();
-    await expect(page.getByTestId('hint-bar')).toBeVisible();
+    await expect(page.getByTestId('hint-bar')).toContainText('tamanho é fixo');
     await clickBoard(page, 0.6, 0.5);
 
-    await expect(page.getByTestId('visual-values-note')).toContainText('Não são dados oficiais');
-    await page.getByTestId('utility-radius').fill('7');
-    const [utility] = Object.values((await savedDoc(page, id)).utilities);
-    expect(utility!.category).toBe('smoke');
-    expect(utility!.shape.radiusM).toBe(7);
+    await expect(page.getByTestId('visual-values-note')).toContainText('não dados oficiais');
+    await expect(page.getByTestId('utility-preset')).toContainText('raio de 4,1 m');
+    for (const removed of ['utility-radius', 'utility-duration', 'utility-until-end', 'utility-travel']) {
+      await expect(page.getByTestId(removed)).toHaveCount(0);
+    }
+    const utility = Object.values((await savedDoc(page, id)).utilities)[0]! as unknown as Record<string, unknown> & { shape: Record<string, unknown> };
+    expect(Object.keys(utility.shape).sort()).toEqual(['center', 'type']);
+    for (const removed of ['category', 'durationMs', 'travelMs']) expect(utility).not.toHaveProperty(removed);
+
+    // Arrastar a habilidade já colocada só a move.
+    const point = await boardPoint(page, 0.6, 0.5);
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.mouse.move(point.x + 40, point.y, { steps: 3 });
+    await page.mouse.up();
+    const moved = Object.values((await savedDoc(page, id)).utilities)[0]!;
+    expect(moved.shape.center!.x).toBeGreaterThan(0.61);
+    expect(Object.keys(moved.shape).sort()).toEqual(['center', 'type']);
+  });
+
+  test('a parede só muda de direção, nunca de comprimento', async ({ page }) => {
+    const id = await createStrategy(page);
+    await page.getByTestId('tab-abilities').click();
+    await page.getByTestId('ability-agent-select').selectOption({ label: 'Sage' });
+    await page.getByTestId('ability-Grenade').click();
+    await dragBoard(page, [0.3, 0.3], [0.3, 0.4]);
+    await expect(page.getByTestId('utility-facing')).toHaveValue('90');
+    await page.getByTestId('utility-facing').fill('45');
+    const wall = Object.values((await savedDoc(page, id)).utilities)[0]!;
+    expect(wall.shape.facing).toBeCloseTo(Math.PI / 4);
+    expect(Object.keys(wall.shape).sort()).toEqual(['center', 'facing', 'type']);
   });
 
   test('paredes, trajetórias e marcadores têm formas próprias', async ({ page }) => {
@@ -483,7 +510,7 @@ test.describe('habilidades', () => {
       await clickBoard(page, x, 0.5);
     }
     await to3D(page);
-    await page.waitForTimeout(600);
+    await expect.poll(async () => (await sceneItems(page)).filter((item) => item.type === 'ability').length).toBe(3);
     await to2D(page);
     expect(Object.keys((await savedDoc(page, id)).utilities)).toHaveLength(3);
   });

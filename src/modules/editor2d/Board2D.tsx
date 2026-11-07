@@ -13,7 +13,8 @@ import type { CollectionName } from '../strategy/schema';
 import { usePlayback } from '../timeline/playbackStore';
 import { simulate } from '../timeline/simulate';
 import { useImage } from '../../ui/useImage';
-import { AgentToken2D, Draft2D, Drawing2D, Route2D, Utility2D } from './entities2d';
+import { Utility2D } from '../abilities/Utility2D';
+import { AgentToken2D, Draft2D, Drawing2D, Route2D } from './entities2d';
 
 interface View {
   scale: number;
@@ -414,7 +415,7 @@ export default function Board2D() {
             })}
           </Layer>
           <Layer listening={false}>
-            {draft && <Draft2D draft={draft} tool={tool} color={drawColor} ui={ui} />}
+            {draft && <Draft2D draft={draft} tool={tool} color={drawColor} frame={frame} ui={ui} />}
             <RemoteCursors ui={ui} />
             {imageStatus === 'error' && (
               <Text x={20} y={20} text="O minimapa não carregou. Mostrando apenas o contorno." fill="#ef3b48" fontSize={18} />

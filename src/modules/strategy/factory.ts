@@ -1,6 +1,5 @@
 // Criação de entidades e edições puras do documento.
-import { classifyAbility, defaultRadius, defaultTravelMs, VISUAL_DEFAULTS } from '../abilities/taxonomy';
-import { metersToMapUnits, type MapFrame, type MapPoint } from '../coordinates';
+import { headingBetween, metersToMapUnits, type MapFrame, type MapPoint } from '../coordinates';
 import { compileRoute } from '../timeline/simulate';
 import {
   SCHEMA_VERSION,
@@ -122,41 +121,34 @@ export function createUtility(options: {
   timeMs: number;
   shape: UtilityShape;
 }): Utility {
-  const { category } = classifyAbility(options.agentUuid, options.slot);
   return {
     id: newId(),
     agentUuid: options.agentUuid,
     abilitySlot: options.slot,
     ownerTokenId: options.ownerTokenId,
-    category,
     timeMs: Math.max(0, options.timeMs),
-    durationMs: null,
-    travelMs: options.shape.type === 'path' ? defaultTravelMs(category) : 0,
     note: '',
     shape: options.shape,
   };
 }
 
-/** Forma inicial quando o usuário só clica, sem arrastar. */
-export function defaultShapeFor(kind: UtilityShape['type'], category: Utility['category'], point: MapPoint, frame: MapFrame): UtilityShape {
-  switch (kind) {
-    case 'circle':
-      return { type: 'circle', center: point, radiusM: defaultRadius(category) };
-    case 'wall': {
-      const half = metersToMapUnits(VISUAL_DEFAULTS.wallLengthM / 2, frame);
-      return {
-        type: 'wall',
-        points: [{ x: point.x - half, y: point.y }, { x: point.x + half, y: point.y }],
-        thicknessM: VISUAL_DEFAULTS.wallThicknessM,
-      };
-    }
-    case 'path': {
-      const step = metersToMapUnits(6, frame);
-      return { type: 'path', points: [point, { x: point.x + step, y: point.y }], curved: false };
-    }
-    case 'marker':
-      return { type: 'marker', point, facing: null };
-  }
+/**
+ * Parede a partir do gesto. O arrasto só escolhe a direção: ela nasce no ponto inicial e o
+ * comprimento vem do preset. Sem arrasto, fica centrada no clique.
+ */
+export function wallFromGesture(start: MapPoint, end: MapPoint | null, lengthM: number, frame: MapFrame): Extract<UtilityShape, { type: 'wall' }> {
+  if (!end) return { type: 'wall', center: start, facing: 0 };
+  const facing = headingBetween(start, end);
+  const half = metersToMapUnits(lengthM / 2, frame);
+  return { type: 'wall', center: { x: start.x + Math.cos(facing) * half, y: start.y + Math.sin(facing) * half }, facing };
+}
+
+/** Extremos da parede, em coordenadas de mapa, para o comprimento do preset. */
+export function wallEndpoints(center: MapPoint, facing: number, lengthM: number, frame: MapFrame): [MapPoint, MapPoint] {
+  const half = metersToMapUnits(lengthM / 2, frame);
+  const dx = Math.cos(facing) * half;
+  const dy = Math.sin(facing) * half;
+  return [{ x: center.x - dx, y: center.y - dy }, { x: center.x + dx, y: center.y + dy }];
 }
 
 const shiftPoint = (p: MapPoint, dx: number, dy: number): MapPoint => ({ x: p.x + dx, y: p.y + dy });
@@ -165,10 +157,11 @@ export function translateUtility(utility: Utility, dx: number, dy: number): Util
   const shape = utility.shape;
   switch (shape.type) {
     case 'circle':
+    case 'wall':
       return { ...utility, shape: { ...shape, center: shiftPoint(shape.center, dx, dy) } };
     case 'marker':
       return { ...utility, shape: { ...shape, point: shiftPoint(shape.point, dx, dy) } };
-    default:
+    case 'path':
       return { ...utility, shape: { ...shape, points: shape.points.map((p) => shiftPoint(p, dx, dy)) } };
   }
 }
@@ -201,7 +194,7 @@ export const entityAnchor = (entity: AgentToken | Utility | Drawing): MapPoint =
   if ('position' in entity) return entity.position;
   if ('shape' in entity) {
     const shape = entity.shape;
-    if (shape.type === 'circle') return shape.center;
+    if (shape.type === 'circle' || shape.type === 'wall') return shape.center;
     if (shape.type === 'marker') return shape.point;
     return shape.points[0]!;
   }

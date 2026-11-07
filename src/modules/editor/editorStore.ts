@@ -28,6 +28,8 @@ export interface Draft {
   points: MapPoint[];
   /** Posição atual do ponteiro, para pré-visualizar o próximo ponto. */
   cursor: MapPoint | null;
+  /** Raio ou comprimento do preset da habilidade, para a pré-visualização mostrar o tamanho real. */
+  previewM?: number;
 }
 
 export interface PendingUtility {

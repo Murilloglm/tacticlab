@@ -36,7 +36,11 @@ function Accuracy() {
                 ? `Alturas estimadas pelo tom do minimapa e por ${g.heightAnchors} pontos de callout.`
                 : 'Alturas estimadas só pelo tom do minimapa.'}
             </li>
-            <li>Paredes, caixas e muretas têm altura padrão, não medida.</li>
+            {map.layout ? (
+              <li data-testid="tactical-layout-note">Cenário tático revisado: coberturas, portas e rampas posicionadas a partir do minimapa, com alturas estimadas.</li>
+            ) : (
+              <li>Paredes, caixas e muretas têm altura padrão, não medida.</li>
+            )}
             {!g.calloutsReliable && g.frame.scaleKnown && <li>Os nomes de locais deste mapa não coincidem bem com a imagem e podem estar deslocados.</li>}
           </ul>
         </div>

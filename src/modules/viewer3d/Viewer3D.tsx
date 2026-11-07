@@ -15,7 +15,10 @@ import { distanceMeters, mapToWorld, type MapPoint } from '../coordinates';
 import { isTextEntry } from '../../ui/dom';
 import { Button } from '../../ui/kit';
 import { MapModel } from './MapModel';
-import { Draft3D, Drawing3D, Route3D, AgentSprite, Utility3D } from './entities3d';
+import { AgentModel3D } from './agents/AgentModel3D';
+import { Utility3D } from './abilities/Utility3D';
+import { Draft3D, Drawing3D, Route3D } from './entities3d';
+import { SceneManifestBridge, SceneManifestSummary } from './sceneManifest';
 import { rayToMapPoint } from './mapMeshes';
 import { CameraHud } from './CameraHud';
 
@@ -142,10 +145,11 @@ function Objects() {
       ))}
       {Object.values(doc.agents).map((agent) => {
         const pose = simulation.agents[agent.id];
-        return pose ? <AgentSprite key={agent.id} agent={agent} pose={pose} selected={isSelected('agents', agent.id)} /> : null;
+        return pose ? <AgentModel3D key={agent.id} agent={agent} pose={pose} selected={isSelected('agents', agent.id)} /> : null;
       })}
       {draft && <Draft3D draft={draft} color={drawColor} />}
       <RemoteCursors3D />
+      <SceneManifestBridge />
     </>
   );
 }
@@ -220,7 +224,7 @@ export default function Viewer3D() {
         style={{ touchAction: 'none' }}
       >
         <color attach="background" args={['#0c0d10']} />
-        <hemisphereLight args={['#f4f6fb', '#23262d', 1.5]} />
+        <hemisphereLight args={['#f4f6fb', '#5a606a', 1.6]} />
         <directionalLight position={[60, 120, 40]} intensity={1.7} />
         <directionalLight position={[-70, 60, -50]} intensity={0.55} />
         <MapModel />
@@ -230,6 +234,7 @@ export default function Viewer3D() {
         <CaptureBridge />
       </Canvas>
       <CameraHud />
+      <SceneManifestSummary />
       {cameraMode === 'ghost' && touch && <TouchControls />}
     </div>
   );

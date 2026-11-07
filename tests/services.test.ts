@@ -30,7 +30,8 @@ import { dbPut } from '@/modules/persistence/idb';
 import { docActions, docStore } from '@/modules/strategy/docStore';
 import { editorStore, initialEditorState } from '@/modules/editor/editorStore';
 import { armAgent, armUtility, deleteSelection, duplicateSelection, interaction, setTool } from '@/modules/editor/interaction';
-import { appendWaypoint, createWaypoint, faceAgentAt, placeAgentAt, removeWaypoint, shiftRoute, translateAgent, translateDrawing, translateUtility, createUtility, defaultShapeFor } from '@/modules/strategy/factory';
+import { appendWaypoint, createWaypoint, faceAgentAt, placeAgentAt, removeWaypoint, shiftRoute, translateAgent, translateDrawing, translateUtility, createUtility, wallEndpoints, wallFromGesture } from '@/modules/strategy/factory';
+import { utilityDefinition } from '@/modules/abilities/definitions';
 import { compileRoute } from '@/modules/timeline/simulate';
 import { agent, emptyDoc, FRAME } from './helpers';
 
@@ -496,15 +497,21 @@ describe('edições de rota e keyframes', () => {
     const line = translateDrawing({ id: 'l', type: 'line', points: [{ x: 0, y: 0 }, { x: 0.1, y: 0 }], color: '#ffffff', width: 2, arrow: false, dashed: false }, 0.1, 0);
     expect(line.type === 'line' && line.points[1]!.x).toBeCloseTo(0.2);
 
-    const smoke = createUtility({ agentUuid: 'x', slot: 'Ability2', ownerTokenId: null, timeMs: 0, shape: { type: 'circle', center: { x: 0, y: 0 }, radiusM: 3 } });
+    const smoke = createUtility({ agentUuid: 'x', slot: 'Ability2', ownerTokenId: null, timeMs: 0, shape: { type: 'circle', center: { x: 0, y: 0 } } });
     const movedSmoke = translateUtility(smoke, 0.5, 0.5);
     expect(movedSmoke.shape.type === 'circle' && movedSmoke.shape.center).toEqual({ x: 0.5, y: 0.5 });
   });
 
-  it('as formas padrão usam a escala do mapa', () => {
-    const wall = defaultShapeFor('wall', 'wall', { x: 0.5, y: 0.5 }, FRAME);
-    expect(wall.type === 'wall' && wall.points[1]!.x - wall.points[0]!.x).toBeCloseTo(0.12);
-    expect(defaultShapeFor('marker', 'trap', { x: 0.5, y: 0.5 }, FRAME)).toEqual({ type: 'marker', point: { x: 0.5, y: 0.5 }, facing: null });
+  it('a parede tem o comprimento do preset e o arrasto só escolhe a direção', () => {
+    const clicked = wallFromGesture({ x: 0.5, y: 0.5 }, null, 12, FRAME);
+    expect(clicked).toEqual({ type: 'wall', center: { x: 0.5, y: 0.5 }, facing: 0 });
+    const [a, b] = wallEndpoints(clicked.center, clicked.facing, 12, FRAME);
+    expect(b.x - a.x).toBeCloseTo(0.12);
+
+    const near = wallFromGesture({ x: 0.1, y: 0.1 }, { x: 0.11, y: 0.1 }, 12, FRAME);
+    const far = wallFromGesture({ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, 12, FRAME);
+    expect(far).toEqual(near);
+    expect(near.center.x).toBeCloseTo(0.16);
   });
 });
 
@@ -623,22 +630,34 @@ describe('controlador de ferramentas (compartilhado por 2D e 3D)', () => {
     expect(editorStore.getState().tool).toBe('select');
   });
 
-  it('posiciona smoke (círculo) no instante atual, com raio padrão editável', () => {
+  it('posiciona smoke no instante atual, sem guardar tamanho na instância', () => {
     playbackActions.seek(3000, 30000);
     armUtility(OMEN, 'Ability2', null);
     click(0.5, 0.5);
     const [utility] = Object.values(doc().utilities);
-    expect(utility).toMatchObject({ category: 'smoke', timeMs: 3000, shape: { type: 'circle' } });
-    expect(utility!.shape.type === 'circle' && utility!.shape.radiusM).toBeGreaterThan(0);
+    expect(utility).toMatchObject({ timeMs: 3000, shape: { type: 'circle', center: { x: 0.5, y: 0.5 } } });
+    expect(utility!.shape).not.toHaveProperty('radiusM');
+    expect(utilityDefinition(utility!).category).toBe('smoke');
+    expect(utilityDefinition(utility!).size.radiusM).toBeGreaterThan(0);
   });
 
-  it('arrastar define o raio do círculo', () => {
+  it('arrastar reposiciona o círculo e não muda o tamanho', () => {
     armUtility(OMEN, 'Ability2', null);
     interaction.down({ x: 0.5, y: 0.5 }, null);
     interaction.move({ x: 0.55, y: 0.5 });
     interaction.up({ x: 0.55, y: 0.5 });
     const [utility] = Object.values(doc().utilities);
-    expect(utility!.shape.type === 'circle' && utility!.shape.radiusM).toBeCloseTo(5);
+    expect(utility!.shape).toEqual({ type: 'circle', center: { x: 0.55, y: 0.5 } });
+  });
+
+  it('a alça de raio não altera habilidades', () => {
+    armUtility(OMEN, 'Ability2', null);
+    click(0.5, 0.5);
+    const [utility] = Object.values(doc().utilities);
+    interaction.down({ x: 0.6, y: 0.5 }, { kind: 'radius', ref: { c: 'utilities', id: utility!.id } });
+    interaction.move({ x: 0.7, y: 0.5 });
+    interaction.up({ x: 0.7, y: 0.5 });
+    expect(doc().utilities[utility!.id]).toEqual(utility);
   });
 
   it('trajetória parte do agente dono e termina em Concluir', () => {
@@ -653,14 +672,23 @@ describe('controlador de ferramentas (compartilhado por 2D e 3D)', () => {
     expect(utility!.shape.type === 'path' && utility!.shape.points).toEqual([{ x: 0.2, y: 0.2 }, { x: 0.3, y: 0.3 }, { x: 0.4, y: 0.4 }]);
   });
 
-  it('parede com arrasto usa os dois pontos', () => {
+  it('o arrasto da parede define a direção, e girar não muda o comprimento', () => {
     const viper = '707eab51-4836-f488-046a-cda6bf494859';
     armUtility(viper, 'Ability2', null);
     interaction.down({ x: 0.1, y: 0.1 }, null);
-    interaction.move({ x: 0.5, y: 0.1 });
-    interaction.up({ x: 0.5, y: 0.1 });
+    interaction.move({ x: 0.1, y: 0.2 });
+    interaction.up({ x: 0.1, y: 0.2 });
     const [utility] = Object.values(doc().utilities);
-    expect(utility!.shape.type === 'wall' && utility!.shape.points).toEqual([{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }]);
+    expect(utility!.shape).toMatchObject({ type: 'wall' });
+    expect(utility!.shape.type === 'wall' && utility!.shape.facing).toBeCloseTo(Math.PI / 2);
+
+    const center = utility!.shape.type === 'wall' ? utility!.shape.center : { x: 0, y: 0 };
+    interaction.down({ x: 0, y: 0 }, { kind: 'rotate', ref: { c: 'utilities', id: utility!.id } });
+    interaction.move({ x: center.x + 0.1, y: center.y });
+    interaction.up({ x: center.x + 0.1, y: center.y });
+    const rotated = doc().utilities[utility!.id]!;
+    expect(rotated.shape.type === 'wall' && rotated.shape.facing).toBeCloseTo(0);
+    expect(rotated.shape).not.toHaveProperty('points');
   });
 
   it('marcador com arrasto define a direção', () => {
@@ -739,7 +767,7 @@ describe('timeline', () => {
         a1: agent({ agentUuid: 'omen', route: { startMs: 1000, speedMps: 5, waypoints: [createWaypoint({ x: 0.1, y: 0 })] } }),
       },
       utilities: {
-        u1: createUtility({ agentUuid: 'omen', slot: 'Ability2', ownerTokenId: 'a1', timeMs: 500, shape: { type: 'circle', center: { x: 0, y: 0 }, radiusM: 3 } }),
+        u1: createUtility({ agentUuid: 'omen', slot: 'Ability2', ownerTokenId: 'a1', timeMs: 500, shape: { type: 'circle', center: { x: 0, y: 0 } } }),
       },
       notes: { n1: { id: 'n1', timeMs: 2000, text: 'Entrar' } },
     });

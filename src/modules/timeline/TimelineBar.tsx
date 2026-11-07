@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { CATEGORY_COLOR } from '../abilities/taxonomy';
+import { utilityColor } from '../abilities/definitions';
+import { utilityBarEndMs } from '../abilities/timeline';
 import { findAgent, useCatalog } from '../catalog/catalogStore';
 import { editorStore, setEditor, useEditor } from '../editor/editorStore';
 import { TEAM_COLOR } from '../editor/sceneStyle';
@@ -19,7 +20,6 @@ type Drag =
   | { type: 'route'; agent: AgentToken; grabMs: number; startMs: number; key: string }
   | { type: 'keyframe'; agent: AgentToken; waypointId: string; key: string }
   | { type: 'utility'; utility: Utility; grabMs: number; key: string }
-  | { type: 'utility-end'; utility: Utility; key: string }
   | { type: 'note'; note: TimelineNote; key: string };
 
 function rulerStep(duration: number, width: number): number {
@@ -117,9 +117,6 @@ export function TimelineBar() {
         }
         case 'utility':
           docActions.change([{ c: 'utilities', id: current.utility.id, after: { ...current.utility, timeMs: snap(current.utility.timeMs + (ms - current.grabMs)) } }], { coalesce: current.key });
-          break;
-        case 'utility-end':
-          docActions.change([{ c: 'utilities', id: current.utility.id, after: { ...current.utility, durationMs: Math.max(100, snap(ms - current.utility.timeMs)) } }], { coalesce: current.key });
           break;
         case 'note':
           docActions.change([{ c: 'notes', id: current.note.id, after: { ...current.note, timeMs: snap(ms) } }], { coalesce: current.key });
@@ -299,7 +296,7 @@ export function TimelineBar() {
                     </>
                   )}
                   {row.utilities.map((utility) => {
-                    const end = utility.durationMs === null ? duration : utility.timeMs + utility.durationMs;
+                    const end = utilityBarEndMs(utility) ?? duration;
                     const selected = selection.some((s) => s.c === 'utilities' && s.id === utility.id);
                     return (
                       <div
@@ -313,21 +310,13 @@ export function TimelineBar() {
                         style={{
                           left: toX(utility.timeMs),
                           width: Math.max(10, toX(end - utility.timeMs)),
-                          backgroundColor: `${CATEGORY_COLOR[utility.category]}cc`,
+                          backgroundColor: `${utilityColor(utility)}cc`,
                         }}
                         onPointerDown={(event) => {
                           selectEntity('utilities', utility.id);
                           startDrag(event, { type: 'utility', utility, grabMs: msFromEvent(event), key: `tl:${newId()}` });
                         }}
-                      >
-                        {utility.durationMs !== null && (
-                          <span
-                            aria-hidden="true"
-                            className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-bone/70"
-                            onPointerDown={(event) => startDrag(event, { type: 'utility-end', utility, key: `tl:${newId()}` })}
-                          />
-                        )}
-                      </div>
+                      />
                     );
                   })}
                 </div>

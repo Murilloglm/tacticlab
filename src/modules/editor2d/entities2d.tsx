@@ -1,11 +1,12 @@
 // Representação 2D de cada objeto. `hit` é lido pelo Board2D para descobrir o que está sob o ponteiro.
 import { Arrow, Circle, Group, Image as KImage, Line, Text, Wedge } from 'react-konva';
-import { BOARD_SIZE, metersToMapUnits, smoothPolyline, type MapFrame, type MapPoint } from '../coordinates';
+import { BOARD_SIZE, metersToMapUnits, type MapFrame, type MapPoint } from '../coordinates';
 import type { AgentInfo } from '../catalog/types';
 import type { Draft } from '../editor/editorStore';
-import { categoryColor, initials, TEAM_COLOR } from '../editor/sceneStyle';
-import type { AgentToken, Drawing, Utility } from '../strategy/schema';
-import { compileRoute, utilityPathPoint, type AgentPose, type UtilityState } from '../timeline/simulate';
+import { initials, TEAM_COLOR } from '../editor/sceneStyle';
+import { wallFromGesture, wallEndpoints } from '../strategy/factory';
+import type { AgentToken, Drawing } from '../strategy/schema';
+import { compileRoute, type AgentPose } from '../timeline/simulate';
 import { useImage } from '../../ui/useImage';
 
 const px = (p: MapPoint) => ({ x: p.x * BOARD_SIZE, y: p.y * BOARD_SIZE });
@@ -137,105 +138,6 @@ export function Route2D({ agent, frame, selected, ui }: { agent: AgentToken; fra
   );
 }
 
-function AbilityGlyph({ url, point, ui, color, hit }: { url: string | null | undefined; point: MapPoint; ui: number; color: string; hit?: string }) {
-  const { image } = useImage(url);
-  const { x, y } = px(point);
-  const r = 10 * ui;
-  return (
-    <Group x={x} y={y} hit={hit}>
-      <Circle radius={r} fill="#14161a" stroke={color} strokeWidth={1.5 * ui} />
-      {image && <KImage image={image} x={-r * 0.72} y={-r * 0.72} width={r * 1.44} height={r * 1.44} listening={false} />}
-    </Group>
-  );
-}
-
-interface UtilityProps {
-  utility: Utility;
-  state: UtilityState | undefined;
-  opacity: number;
-  frame: MapFrame;
-  iconUrl: string | null | undefined;
-  selected: boolean;
-  ui: number;
-}
-
-export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, ui }: UtilityProps) {
-  if (opacity <= 0) return null;
-  const color = categoryColor(utility.category);
-  const hit = `utilities:${utility.id}`;
-  const shape = utility.shape;
-
-  switch (shape.type) {
-    case 'circle': {
-      const r = metersToMapUnits(shape.radiusM, frame) * BOARD_SIZE;
-      const { x, y } = px(shape.center);
-      return (
-        <Group opacity={opacity}>
-          <Circle
-            x={x}
-            y={y}
-            radius={r}
-            fill={color}
-            opacity={utility.category === 'smoke' ? 0.42 : 0.26}
-            stroke={selected ? '#ffffff' : color}
-            strokeWidth={(selected ? 2 : 1.5) * ui}
-            hit={hit}
-          />
-          <AbilityGlyph url={iconUrl} point={shape.center} ui={ui} color={color} hit={hit} />
-          {selected && <Handle point={{ x: shape.center.x + r / BOARD_SIZE, y: shape.center.y }} hit={`radius:utilities:${utility.id}`} ui={ui} />}
-        </Group>
-      );
-    }
-    case 'wall': {
-      const width = Math.max(3 * ui, metersToMapUnits(shape.thicknessM, frame) * BOARD_SIZE);
-      const middle = shape.points[Math.floor(shape.points.length / 2)]!;
-      return (
-        <Group opacity={opacity}>
-          <Line points={flat(shape.points)} stroke={selected ? '#ffffff' : color} strokeWidth={width + (selected ? 2 * ui : 0)} lineCap="round" lineJoin="round" hit={hit} hitStrokeWidth={Math.max(16 * ui, width)} />
-          <AbilityGlyph url={iconUrl} point={middle} ui={ui * 0.85} color={color} hit={hit} />
-          {selected && shape.points.map((p, i) => <Handle key={i} point={p} hit={`vertex:utilities:${utility.id}:${i}`} ui={ui} />)}
-        </Group>
-      );
-    }
-    case 'path': {
-      const points = shape.curved ? smoothPolyline(shape.points) : shape.points;
-      const moving = state?.started && state.progress < 1 ? utilityPathPoint(utility, state.progress) : null;
-      const end = shape.points[shape.points.length - 1]!;
-      return (
-        <Group opacity={opacity}>
-          <Arrow
-            points={flat(points)}
-            stroke={selected ? '#ffffff' : color}
-            fill={selected ? '#ffffff' : color}
-            strokeWidth={2.5 * ui}
-            pointerLength={10 * ui}
-            pointerWidth={9 * ui}
-            hit={hit}
-            hitStrokeWidth={16 * ui}
-          />
-          <AbilityGlyph url={iconUrl} point={moving ?? (state?.progress === 1 ? end : shape.points[0]!)} ui={ui} color={color} hit={hit} />
-          {selected && shape.points.map((p, i) => <Handle key={i} point={p} hit={`vertex:utilities:${utility.id}:${i}`} ui={ui} />)}
-        </Group>
-      );
-    }
-    case 'marker': {
-      const { x, y } = px(shape.point);
-      const reach = 34 * ui;
-      const tipX = shape.facing === null ? x + reach : x + Math.cos(shape.facing) * reach;
-      const tipY = shape.facing === null ? y : y + Math.sin(shape.facing) * reach;
-      return (
-        <Group opacity={opacity}>
-          {shape.facing !== null && (
-            <Arrow points={[x, y, tipX, tipY]} stroke={color} fill={color} strokeWidth={2 * ui} pointerLength={7 * ui} pointerWidth={7 * ui} listening={false} />
-          )}
-          <AbilityGlyph url={iconUrl} point={shape.point} ui={ui * 1.15} color={selected ? '#ffffff' : color} hit={hit} />
-          {selected && <Handle point={{ x: tipX / BOARD_SIZE, y: tipY / BOARD_SIZE }} hit={`rotate:utilities:${utility.id}`} ui={ui} />}
-        </Group>
-      );
-    }
-  }
-}
-
 export function Drawing2D({ drawing, frame, selected, ui }: { drawing: Drawing; frame: MapFrame; selected: boolean; ui: number }) {
   const hit = `drawings:${drawing.id}`;
   switch (drawing.type) {
@@ -310,19 +212,30 @@ export function Drawing2D({ drawing, frame, selected, ui }: { drawing: Drawing; 
   }
 }
 
-export function Draft2D({ draft, tool, color, ui }: { draft: Draft; tool: string; color: string; ui: number }) {
+export function Draft2D({ draft, tool, color, frame, ui }: { draft: Draft; tool: string; color: string; frame: MapFrame; ui: number }) {
   const start = draft.points[0];
   if (!start) return null;
   const cursor = draft.cursor ?? start;
 
-  if (draft.kind === 'area' || (draft.kind === 'utility' && draft.shape === 'circle')) {
-    const edge = draft.kind === 'area' ? (draft.points[1] ?? start) : cursor;
+  if (draft.kind === 'utility' && draft.shape === 'circle') {
+    // Mostra o raio real do preset no ponto onde a habilidade vai ficar.
+    const { x, y } = px(cursor);
+    const radius = metersToMapUnits(draft.previewM ?? 1, frame) * BOARD_SIZE;
+    return <Circle x={x} y={y} radius={radius} stroke={color} strokeWidth={2 * ui} dash={[6 * ui, 4 * ui]} fill={color} opacity={0.5} listening={false} />;
+  }
+  if (draft.kind === 'area') {
+    const edge = draft.points[1] ?? start;
     const radius = Math.hypot(edge.x - start.x, edge.y - start.y) * BOARD_SIZE;
     const { x, y } = px(start);
     return <Circle x={x} y={y} radius={Math.max(radius, 6 * ui)} stroke={color} strokeWidth={2 * ui} dash={[6 * ui, 4 * ui]} fill={color} opacity={0.5} listening={false} />;
   }
   if (draft.kind === 'utility' && draft.shape === 'path') {
     return <Arrow points={flat([...draft.points, cursor])} stroke="#ffffff" fill="#ffffff" strokeWidth={2 * ui} dash={[6 * ui, 4 * ui]} pointerLength={8 * ui} pointerWidth={8 * ui} listening={false} />;
+  }
+  if (draft.kind === 'utility' && draft.shape === 'wall') {
+    const lengthM = draft.previewM ?? 1;
+    const wall = wallFromGesture(start, cursor, lengthM, frame);
+    return <Line points={flat(wallEndpoints(wall.center, wall.facing, lengthM, frame))} stroke="#ffffff" strokeWidth={3 * ui} dash={[6 * ui, 4 * ui]} listening={false} />;
   }
   if (draft.kind === 'utility') {
     return <Line points={flat([start, cursor])} stroke="#ffffff" strokeWidth={3 * ui} dash={[6 * ui, 4 * ui]} listening={false} />;
