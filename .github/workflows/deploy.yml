@@ -1,0 +1,75 @@
+name: Testar e publicar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tacticlab-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Verificar
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      # Os testes de navegador usam o build no subcaminho padrão, /tacticlab/.
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+
+  deploy:
+    name: Publicar no GitHub Pages
+    # Nada é publicado sem passar pela verificação, nem a partir de pull requests.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Gerar o site para o caminho deste repositório
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          # Opcionais. Só a URL e a chave pública: as regras de acesso ficam nas políticas RLS.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [[ "$REPO_NAME" == *.github.io ]]; then
+            export VITE_BASE=/
+          else
+            export VITE_BASE="/$REPO_NAME/"
+          fi
+          npm run build
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v5

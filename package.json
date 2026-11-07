@@ -1,0 +1,55 @@
+{
+  "name": "tacticlab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Plataforma de treinamento tático para VALORANT com prancheta 2D, cenário 3D simplificado, timeline e salas colaborativas.",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "maps:generate": "node scripts/generate-map-data.mjs",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
+    "@supabase/supabase-js": "^2.119.0",
+    "konva": "^10.9.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-konva": "^19.3.2",
+    "three": "^0.187.0",
+    "zod": "^4.6.7",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "fake-indexeddb": "^6.2.7",
+    "globals": "^17.14.0",
+    "pngjs": "^7.0.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
+  }
+}

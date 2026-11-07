@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TacticLab</title>
+    <script>
+      // O app usa rotas com #. Um endereço sem # que caiu aqui volta para a raiz do projeto.
+      var isUserSite = /\.github\.io$/.test(location.hostname) && location.pathname.split('/').length < 3;
+      var project = location.pathname.split('/')[1];
+      location.replace(isUserSite || !project ? '/' : '/' + project + '/');
+    </script>
+  </head>
+  <body>
+    <p>Redirecionando para o TacticLab…</p>
+  </body>
+</html>

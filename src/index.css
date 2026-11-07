@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Saira', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+
+  --color-ink: #0c0d10;
+  --color-carbon: #14161a;
+  --color-graphite: #1c1f24;
+  --color-steel: #2b2f36;
+  --color-iron: #474c55;
+  --color-ash: #a0a7b2;
+  --color-bone: #f2f3f5;
+  --color-signal: #ef3b48;
+  --color-signal-deep: #b7212d;
+  --color-attack: #ef3b48;
+  --color-defense: #2fc4d6;
+}
+
+:root {
+  color-scheme: dark;
+  /* Canto cortado a 45°: o mesmo ângulo das paredes dos minimapas, assinatura visual da interface. */
+  --cut: 7px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-bone);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-bone);
+  outline-offset: 2px;
+}
+
+.cut {
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--cut)) 0,
+    100% var(--cut),
+    100% 100%,
+    var(--cut) 100%,
+    0 calc(100% - var(--cut))
+  );
+}
+
+/* clip-path recorta o foco; nestes elementos o contorno fica interno. */
+.cut:focus-visible {
+  outline-offset: -3px;
+}
+
+.display {
+  font-stretch: 78%;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1.02;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.field {
+  width: 100%;
+  background: var(--color-ink);
+  border: 1px solid var(--color-steel);
+  color: var(--color-bone);
+  padding: 0.4rem 0.6rem;
+  border-radius: 2px;
+}
+
+.field:focus {
+  border-color: var(--color-bone);
+  outline: none;
+}
+
+.field-label {
+  display: block;
+  color: var(--color-ash);
+  font-size: 0.82rem;
+  margin-bottom: 0.2rem;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-iron) transparent;
+}
+
+.touch-none-all {
+  touch-action: none;
+}
+
+.map-plate img {
+  transition: transform 220ms ease;
+}
+
+.map-plate:hover img {
+  transform: scale(1.035);
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.rise {
+  animation: rise 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
