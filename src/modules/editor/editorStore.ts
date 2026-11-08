@@ -30,6 +30,8 @@ export interface Draft {
   cursor: MapPoint | null;
   /** Raio ou comprimento do preset da habilidade, para a pré-visualização mostrar o tamanho real. */
   previewM?: number;
+  /** Parte da parede que começa atrás do ponto inicial. */
+  previewBackM?: number;
 }
 
 export interface PendingUtility {

@@ -204,7 +204,7 @@ function finishUtilityDraft(endPoint: MapPoint | null): void {
       placeUtility({ type: 'marker', point: start, facing: dragged ? headingBetween(start, end) : null });
       break;
     case 'wall':
-      placeUtility(wallFromGesture(start, dragged ? end : null, definition.size.lengthM, frame()));
+      placeUtility(wallFromGesture(start, dragged ? end : null, definition.size.lengthM, frame(), definition.offset.backM));
       break;
     case 'path': {
       if (draft.points.length < 2) {
@@ -327,9 +327,9 @@ export const interaction = {
           });
           return true;
         }
-        const { size } = abilityDefinition(pending.agentUuid, pending.slot);
+        const { size, offset } = abilityDefinition(pending.agentUuid, pending.slot);
         const previewM = pending.shape === 'circle' ? size.radiusM : pending.shape === 'wall' ? size.lengthM : undefined;
-        setEditor({ draft: { kind: 'utility', shape: pending.shape, points: [point], cursor: point, previewM } });
+        setEditor({ draft: { kind: 'utility', shape: pending.shape, points: [point], cursor: point, previewM, previewBackM: offset.backM } });
         gesture = { type: 'draft', start: point };
         return true;
       }

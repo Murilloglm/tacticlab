@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { presetSummary, utilityDefinition } from '../abilities/definitions';
 import { CATEGORY_LABEL } from '../abilities/taxonomy';
+import { utilityTravelMs } from '../abilities/timeline';
 import { findAgent, findMap, useCatalog } from '../catalog/catalogStore';
 import { useRoom } from '../multiplayer/roomStore';
 import { HistoryDialog } from '../persistence/HistoryDialog';
@@ -166,11 +167,12 @@ function UtilityEditor({ utility, readOnly }: { utility: Utility; readOnly: bool
   const shape = utility.shape;
   const owner = utility.ownerTokenId ? agents?.[utility.ownerTokenId] : undefined;
   const definition = utilityDefinition(utility);
+  const frame = useEditor((s) => s.frame);
 
   const applyToRoute = () => {
     if (!owner || shape.type !== 'path') return;
     const route = owner.route ?? { startMs: 0, speedMps: 5, waypoints: [] };
-    const span = definition.timing.travelMs;
+    const span = utilityTravelMs(utility, frame);
     const steps = shape.points.slice(1);
     const waypoints = steps.map((point, i) =>
       createWaypoint(point, { arriveAtMs: utility.timeMs + (span * (i + 1)) / steps.length }),

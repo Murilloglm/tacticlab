@@ -296,7 +296,7 @@ export function TimelineBar() {
                     </>
                   )}
                   {row.utilities.map((utility) => {
-                    const end = utilityBarEndMs(utility) ?? duration;
+                    const end = utilityBarEndMs(utility, frame) ?? duration;
                     const selected = selection.some((s) => s.c === 'utilities' && s.id === utility.id);
                     return (
                       <div

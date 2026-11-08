@@ -95,9 +95,9 @@ As ferramentas ficam em um único controlador (`editor/interaction.ts`): as duas
 
 O resultado é **aproximado** e identificado assim na interface. Não é o modelo do jogo: a altura de paredes e caixas é padronizada, e o cenário não tem colisão real. Para corrigir um mapa, veja [`scripts/map-overrides`](scripts/map-overrides/README.md).
 
-A categoria de cada habilidade (smoke, flash etc.) é uma curadoria própria, em `abilities/taxonomy.ts`. A API não fornece alcance nem duração, então tamanho e tempo são presets fixos do TacticLab, em `abilities/definitions.ts`: são aproximações, rotuladas como não oficiais, e o usuário ajusta só posição, direção, trajetória e instante. Corrigir um preset vale para todas as estratégias, porque nenhuma guarda cópia dele.
+A categoria de cada habilidade (smoke, flash etc.) é uma curadoria própria, em `abilities/taxonomy.ts`. A API não fornece alcance nem duração, então tamanho e tempo são presets fixos do TacticLab, na tabela de calibração `abilities/calibration.ts`, que registra a origem de cada número (wiki oficial ou estimativa): são aproximações, rotuladas como não oficiais, e o usuário ajusta só posição, direção, trajetória e instante. Corrigir um preset vale para todas as estratégias, porque nenhuma guarda cópia dele.
 
-O mapa piloto, Ascent, tem um layout tático em `maps/tactical/`, com coberturas, portas e rampas lidas do minimapa. Os outros mapas usam a geometria gerada. Para expandir, crie o arquivo do mapa nessa pasta e registre o UUID em `maps/tactical/index.ts`.
+Ascent, Bind e Haven têm layout tático em `maps/tactical/`, com coberturas, portas, escadas, rampas e entradas de bombsite lidas do minimapa. Os outros mapas usam a geometria gerada. Para expandir, crie o arquivo do mapa nessa pasta e registre o UUID em `maps/tactical/index.ts`.
 
 Agentes novos aparecem automaticamente, com as habilidades marcadas como "Não classificada" até entrarem na tabela. Mapas novos aparecem no 2D e precisam de `npm run maps:generate` para ter cenário 3D.
 

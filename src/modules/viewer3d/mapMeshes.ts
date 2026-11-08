@@ -23,7 +23,7 @@ function isSitePoint(geometry: MapGeometry, x: number, y: number): boolean {
 }
 
 /** Piso em grade, com cor por altura e tom próprio nos sites. */
-export function buildFloorGeometry(geometry: MapGeometry, heights: HeightField, frame: MapFrame, zones: TacticalZone[] = []): BufferGeometry {
+export function buildFloorGeometry(geometry: MapGeometry, heights: HeightField, frame: MapFrame, zones: TacticalZone[] = [], excluded: number[][] = []): BufferGeometry {
   const zoneColor = new Color();
   const G = heights.size;
   const S = frame.worldMeters;
@@ -74,6 +74,8 @@ export function buildFloorGeometry(geometry: MapGeometry, heights: HeightField, 
   for (let gy = 0; gy < G; gy++) {
     for (let gx = 0; gx < G; gx++) {
       if (!included[gy * G + gx]) continue;
+      // Áreas que o layout marca como inexistentes no jogo também ficam sem piso.
+      if (excluded.some((ring) => pointInRing((gx + 0.5) / G, (gy + 0.5) / G, ring))) continue;
       const a = vertex(gx, gy);
       const b = vertex(gx + 1, gy);
       const c = vertex(gx + 1, gy + 1);
@@ -155,6 +157,25 @@ export function buildExtrudedGeometry(
   return result;
 }
 
+/** Remove os triângulos cujo centro cai dentro de alguma das áreas, em coordenadas de mapa. */
+export function removeTrianglesInside(geometry: BufferGeometry, rings: number[][], frame: MapFrame): BufferGeometry {
+  if (rings.length === 0) return geometry;
+  const S = frame.worldMeters;
+  const source = geometry.getAttribute('position');
+  const kept: number[] = [];
+  for (let i = 0; i < source.count; i += 3) {
+    const x = (source.getX(i) + source.getX(i + 1) + source.getX(i + 2)) / 3 / S + 0.5;
+    const y = (source.getZ(i) + source.getZ(i + 1) + source.getZ(i + 2)) / 3 / S + 0.5;
+    if (rings.some((ring) => pointInRing(x, y, ring))) continue;
+    for (let k = 0; k < 3; k++) kept.push(source.getX(i + k), source.getY(i + k), source.getZ(i + k));
+  }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(kept), 3));
+  result.computeVertexNormals();
+  geometry.dispose();
+  return result;
+}
+
 /** Sombreia as faces pela altura relativa ao piso: base escura, topo claro. Dá leitura de volume sem textura. */
 export function shadeByHeight(geometry: BufferGeometry, heights: HeightField, frame: MapFrame, extrude: number, base: string, top: string, cap: string): BufferGeometry {
   const S = frame.worldMeters;
@@ -186,7 +207,12 @@ export function buildVoidCaps(polygons: number[][][], heights: HeightField, fram
   const S = frame.worldMeters;
   const G = heights.size;
   const positions: number[] = [];
-  for (const polygon of polygons) {
+  // O polígono de maior contorno é a moldura do mapa. Os furos dele são o piso principal ou áreas fora
+  // do mapa, como as cercadas pela linha do teleportador no Bind, e nunca viram laje.
+  const outerAreas = polygons.map((polygon) => (polygon[0] && polygon[0].length >= 6 ? Math.abs(ShapeUtils.area(ringToVectors(polygon[0]))) : 0));
+  const frameIndex = outerAreas.indexOf(Math.max(...outerAreas));
+  for (const [index, polygon] of polygons.entries()) {
+    if (index === frameIndex) continue;
     for (const hole of polygon.slice(1)) {
       if (hole.length < 6) continue;
       const contour = ringToVectors(hole);
@@ -286,7 +312,7 @@ export function buildRampStripes(ramps: TacticalRamp[], heights: HeightField, fr
   const vertex = (x: number, y: number) => {
     positions.push((x - 0.5) * S, heights.heightAt({ x, y }) + lift, (y - 0.5) * S);
   };
-  for (const ramp of ramps) {
+  for (const ramp of ramps.filter((r) => r.kind !== 'stairs')) {
     const dx = ramp.to.x - ramp.from.x;
     const dy = ramp.to.y - ramp.from.y;
     const length = Math.hypot(dx, dy);
@@ -313,6 +339,85 @@ export function buildRampStripes(ramps: TacticalRamp[], heights: HeightField, fr
       const c = corner(max, half);
       const d = corner(min, half);
       for (const [x, y] of [a, b, c, a, c, d]) vertex(x, y);
+    }
+  }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.computeVertexNormals();
+  return result;
+}
+
+/** Eixo e largura de uma rampa: direção de subida e extensão na perpendicular. */
+function rampAxes(ramp: TacticalRamp) {
+  const dx = ramp.to.x - ramp.from.x;
+  const dy = ramp.to.y - ramp.from.y;
+  const length = Math.hypot(dx, dy);
+  const ux = length ? dx / length : 1;
+  const uy = length ? dy / length : 0;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const p of ringToVectors(ramp.ring)) {
+    const across = -(p.x - ramp.from.x) * uy + (p.y - ramp.from.y) * ux;
+    min = Math.min(min, across);
+    max = Math.max(max, across);
+  }
+  return { length, ux, uy, min, max };
+}
+
+/**
+ * Degraus sobre as escadas do layout: piso de cada degrau na altura do fim dele e espelho vertical.
+ * O campo de alturas continua linear; os degraus são só a leitura visual, até 0,3 m acima dele.
+ */
+export function buildStairs(ramps: TacticalRamp[], heights: HeightField, frame: MapFrame, riseM = 0.3): BufferGeometry {
+  const S = frame.worldMeters;
+  const positions: number[] = [];
+  const quad = (a: number[], b: number[], c: number[], d: number[]) => positions.push(...a, ...b, ...c, ...a, ...c, ...d);
+  for (const ramp of ramps.filter((r) => r.kind === 'stairs')) {
+    const { length, ux, uy, min, max } = rampAxes(ramp);
+    if (length === 0) continue;
+    const from = heights.heightAt(ramp.from);
+    const to = heights.heightAt(ramp.to);
+    const steps = Math.max(2, Math.round(Math.abs(to - from) / riseM));
+    const at = (along: number, across: number, height: number) => {
+      const x = ramp.from.x + ux * along - uy * across;
+      const y = ramp.from.y + uy * along + ux * across;
+      return [(x - 0.5) * S, height, (y - 0.5) * S];
+    };
+    for (let i = 0; i < steps; i++) {
+      const a0 = (i / steps) * length;
+      const a1 = ((i + 1) / steps) * length;
+      // Subindo, o degrau tem a altura do fim do trecho; descendo, a do começo.
+      const tread = from + ((to - from) * (to > from ? i + 1 : i)) / steps + 0.02;
+      const previous = from + ((to - from) * (to > from ? i : i - 1)) / steps + 0.02;
+      quad(at(a0, min, tread), at(a1, min, tread), at(a1, max, tread), at(a0, max, tread));
+      if (i > 0 || to > from) quad(at(a0, min, Math.min(previous, tread)), at(a0, max, Math.min(previous, tread)), at(a0, max, Math.max(previous, tread)), at(a0, min, Math.max(previous, tread)));
+    }
+  }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.computeVertexNormals();
+  return result;
+}
+
+/** Faixas no piso marcando as entradas dos sites. */
+export function buildThresholds(segments: Array<[MapPoint, MapPoint]>, heights: HeightField, frame: MapFrame, widthM = 0.7): BufferGeometry {
+  const S = frame.worldMeters;
+  const positions: number[] = [];
+  for (const [a, b] of segments) {
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (length === 0) continue;
+    const nx = (-(b.y - a.y) / length) * (widthM / 2 / S);
+    const ny = ((b.x - a.x) / length) * (widthM / 2 / S);
+    const steps = Math.max(1, Math.round((length * S) / 1.5));
+    for (let i = 0; i < steps; i++) {
+      const p = { x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps };
+      const q = { x: a.x + ((b.x - a.x) * (i + 1)) / steps, y: a.y + ((b.y - a.y) * (i + 1)) / steps };
+      const corner = (point: MapPoint, side: number) => {
+        const x = point.x + nx * side;
+        const y = point.y + ny * side;
+        return [(x - 0.5) * S, heights.heightAt({ x, y }) + 0.08, (y - 0.5) * S];
+      };
+      positions.push(...corner(p, 1), ...corner(q, 1), ...corner(q, -1), ...corner(p, 1), ...corner(q, -1), ...corner(p, -1));
     }
   }
   const result = new BufferGeometry();
@@ -385,6 +490,54 @@ export function buildGroundDisc(center: MapPoint, radiusM: number, frame: MapFra
     for (let s = 0; s < sides; s++) {
       const next = (s + 1) % sides;
       indices.push(inner + s, inner + next, outer + s, inner + next, outer + next, outer + s);
+    }
+  }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.setIndex(indices);
+  result.computeVertexNormals();
+  return result;
+}
+
+/**
+ * Setor que acompanha o relevo: cone de visão da torreta, alcance de criaturas. Ângulos em radianos,
+ * na mesma convenção das direções de mapa (0 aponta para +x).
+ */
+export function buildGroundSector(
+  center: MapPoint,
+  radiusM: number,
+  startAngle: number,
+  endAngle: number,
+  frame: MapFrame,
+  heights: HeightField | null,
+  lift = 0.12,
+  innerRadiusM = 0,
+): BufferGeometry {
+  const S = frame.worldMeters;
+  const rings = 6;
+  const sides = Math.max(6, Math.round(((endAngle - startAngle) / (Math.PI * 2)) * 48));
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const add = (dx: number, dz: number) => {
+    const x = center.x + dx / S;
+    const y = center.y + dz / S;
+    positions.push((x - 0.5) * S, (heights?.heightAt({ x, y }) ?? 0) + lift, (y - 0.5) * S);
+  };
+  for (let r = 0; r <= rings; r++) {
+    const radius = innerRadiusM + ((radiusM - innerRadiusM) * r) / rings;
+    for (let s = 0; s <= sides; s++) {
+      const angle = startAngle + ((endAngle - startAngle) * s) / sides;
+      add(Math.cos(angle) * radius, Math.sin(angle) * radius);
+    }
+  }
+  const row = sides + 1;
+  for (let r = 0; r < rings; r++) {
+    for (let s = 0; s < sides; s++) {
+      const a = r * row + s;
+      const b = a + 1;
+      const c = a + row;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
     }
   }
   const result = new BufferGeometry();

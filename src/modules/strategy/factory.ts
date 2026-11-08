@@ -136,11 +136,12 @@ export function createUtility(options: {
  * Parede a partir do gesto. O arrasto só escolhe a direção: ela nasce no ponto inicial e o
  * comprimento vem do preset. Sem arrasto, fica centrada no clique.
  */
-export function wallFromGesture(start: MapPoint, end: MapPoint | null, lengthM: number, frame: MapFrame): Extract<UtilityShape, { type: 'wall' }> {
+export function wallFromGesture(start: MapPoint, end: MapPoint | null, lengthM: number, frame: MapFrame, backM = 0): Extract<UtilityShape, { type: 'wall' }> {
   if (!end) return { type: 'wall', center: start, facing: 0 };
   const facing = headingBetween(start, end);
-  const half = metersToMapUnits(lengthM / 2, frame);
-  return { type: 'wall', center: { x: start.x + Math.cos(facing) * half, y: start.y + Math.sin(facing) * half }, facing };
+  // `backM`: parte da parede que nasce atrás do ponto inicial, como na calibração da habilidade.
+  const along = metersToMapUnits(lengthM / 2 - backM, frame);
+  return { type: 'wall', center: { x: start.x + Math.cos(facing) * along, y: start.y + Math.sin(facing) * along }, facing };
 }
 
 /** Extremos da parede, em coordenadas de mapa, para o comprimento do preset. */

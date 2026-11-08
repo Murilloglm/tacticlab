@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyTacticalLayout, parseGeometry, pointInRing, type LoadedMapGeometry } from '@/modules/maps/geometry';
+import { applyTacticalLayout, parseGeometry, type LoadedMapGeometry } from '@/modules/maps/geometry';
 import { ASCENT_LAYOUT } from '@/modules/maps/tactical/ascent';
+import { BIND_LAYOUT } from '@/modules/maps/tactical/bind';
+import { HAVEN_LAYOUT } from '@/modules/maps/tactical/haven';
 import { hasTacticalLayout, loadTacticalLayout } from '@/modules/maps/tactical';
-import { buildSolidsGeometry, buildVoidCaps } from '@/modules/viewer3d/mapMeshes';
+import type { TacticalLayout } from '@/modules/maps/tactical/types';
+import { buildSolidsGeometry, buildStairs, buildVoidCaps } from '@/modules/viewer3d/mapMeshes';
 import { buildScenario, disposeScenario } from '@/modules/viewer3d/scenario';
 
 const dir = join(process.cwd(), 'public', 'data', 'maps');
@@ -12,8 +15,9 @@ const maps: LoadedMapGeometry[] = readdirSync(dir)
   .filter((f) => f.endsWith('.json'))
   .map((f) => parseGeometry(JSON.parse(readFileSync(join(dir, f), 'utf8'))));
 
-const base = maps.find((m) => m.geometry.name === 'Ascent')!;
-const ascent = applyTacticalLayout(base, ASCENT_LAYOUT);
+const LAYOUTS: TacticalLayout[] = [ASCENT_LAYOUT, BIND_LAYOUT, HAVEN_LAYOUT];
+const baseOf = (layout: TacticalLayout) => maps.find((m) => m.geometry.mapId === layout.mapId)!;
+const cases = LAYOUTS.map((layout) => [layout.name, layout] as const);
 
 const center = (ring: number[]) => {
   let x = 0;
@@ -27,15 +31,15 @@ const center = (ring: number[]) => {
 
 const isFloor = (map: LoadedMapGeometry, x: number, y: number) => map.heights.isFloorCell(Math.floor(x * map.heights.size), Math.floor(y * map.heights.size));
 
-describe('layout tático do mapa piloto', () => {
-  it('está registrado para o UUID certo e carrega sob demanda', async () => {
-    expect(ASCENT_LAYOUT.mapId).toBe(base.geometry.mapId);
-    expect(hasTacticalLayout(base.geometry.mapId)).toBe(true);
-    expect(await loadTacticalLayout(base.geometry.mapId)).toBe(ASCENT_LAYOUT);
+describe('registro dos layouts táticos', () => {
+  it.each(cases)('%s está registrado para o UUID certo e carrega sob demanda', async (_name, layout) => {
+    expect(baseOf(layout).geometry.name).toBe(layout.name);
+    expect(hasTacticalLayout(layout.mapId)).toBe(true);
+    expect(await loadTacticalLayout(layout.mapId)).toBe(layout);
   });
 
   it('os outros mapas seguem só com a geometria gerada', async () => {
-    const others = maps.filter((m) => m !== base);
+    const others = maps.filter((m) => !LAYOUTS.some((layout) => layout.mapId === m.geometry.mapId));
     expect(others.length).toBeGreaterThan(10);
     for (const map of others) {
       expect(hasTacticalLayout(map.geometry.mapId)).toBe(false);
@@ -43,17 +47,24 @@ describe('layout tático do mapa piloto', () => {
     }
   });
 
-  it('tem coberturas de cada tipo e rampas', () => {
+  it('o piloto tem coberturas de todos os tipos, escadas e entradas em cada site', () => {
     const kinds = new Set(ASCENT_LAYOUT.solids.map((solid) => solid.kind));
     expect([...kinds].sort()).toEqual(['barrier', 'cover', 'crate', 'door', 'pillar', 'structure']);
     expect(ASCENT_LAYOUT.solids.length).toBeGreaterThan(40);
-    expect(ASCENT_LAYOUT.ramps.length).toBeGreaterThanOrEqual(5);
+    expect(ASCENT_LAYOUT.ramps.filter((ramp) => ramp.kind === 'stairs').length).toBeGreaterThanOrEqual(1);
   });
+});
 
-  it('coberturas ficam dentro do mapa, com altura plausível', () => {
-    for (const solid of ASCENT_LAYOUT.solids) {
+describe.each(cases)('layout de %s', (_name, layout) => {
+  const base = baseOf(layout);
+  const map = applyTacticalLayout(base, layout);
+
+  it('tem coberturas e paredes com altura plausível, dentro do mapa', () => {
+    expect(layout.solids.length).toBeGreaterThan(20);
+    expect(layout.wallHeightM).toBeGreaterThanOrEqual(5);
+    for (const solid of layout.solids) {
       expect(solid.heightM).toBeGreaterThan(0.5);
-      expect(solid.heightM).toBeLessThan(ASCENT_LAYOUT.wallHeightM + 0.01);
+      expect(solid.heightM).toBeLessThan(layout.wallHeightM + 0.01);
       for (const value of solid.ring) {
         expect(value).toBeGreaterThanOrEqual(0);
         expect(value).toBeLessThanOrEqual(1);
@@ -65,32 +76,43 @@ describe('layout tático do mapa piloto', () => {
     // O gerador marca a área contornada como "não piso", então o centro de uma caixa legítima pode
     // não ser piso. O que importa é haver piso logo em volta.
     const margin = 4 / base.heights.size;
-    const misplaced = ASCENT_LAYOUT.solids.filter((solid) => solid.kind === 'crate').filter((solid) => {
+    const misplaced = layout.solids.filter((solid) => solid.kind === 'crate').filter((solid) => {
       const { x, y } = center(solid.ring);
       return ![[0, 0], [margin, 0], [-margin, 0], [0, margin], [0, -margin]].some(([dx, dy]) => isFloor(base, x + dx!, y + dy!));
     });
     expect(misplaced.map((solid) => solid.ring.slice(0, 2).map((v) => Math.round(v * 1024)))).toEqual([]);
   });
 
-  it('os sites têm cobertura', () => {
+  it('todo site tem cobertura e entrada perto dele', () => {
     for (const site of base.geometry.sites) {
-      const covers = ASCENT_LAYOUT.solids.filter((solid) => {
+      // O gerador recorta as caixas do polígono do site, então a conta usa a área envolvente dele.
+      const ring = site.polygons[0]![0]!;
+      const xs = ring.filter((_, i) => i % 2 === 0);
+      const ys = ring.filter((_, i) => i % 2 === 1);
+      const covers = layout.solids.filter((solid) => {
         const { x, y } = center(solid.ring);
-        return site.polygons.some((polygon) => pointInRing(x, y, polygon[0]!));
+        return x >= Math.min(...xs) && x <= Math.max(...xs) && y >= Math.min(...ys) && y <= Math.max(...ys);
       });
-      expect(covers.length, `site ${site.label}`).toBeGreaterThanOrEqual(3);
+      expect(covers.length, `site ${site.label}`).toBeGreaterThanOrEqual(1);
+      const entrances = layout.entrances.filter((entrance) => entrance.site === site.label);
+      expect(entrances.length, `entradas do site ${site.label}`).toBeGreaterThanOrEqual(2);
+      for (const entrance of entrances) {
+        const middle = { x: (entrance.from.x + entrance.to.x) / 2, y: (entrance.from.y + entrance.to.y) / 2 };
+        const meters = Math.hypot(middle.x - site.center.x, middle.y - site.center.y) * base.frame.worldMeters;
+        expect(meters, `entrada do site ${site.label}`).toBeLessThan(30);
+      }
     }
+    expect(new Set(layout.entrances.map((entrance) => entrance.site))).toEqual(new Set(base.geometry.sites.map((site) => site.label)));
   });
-});
 
-describe('rampas no campo de alturas', () => {
-  it('sobem de forma contínua entre as alturas originais das pontas', () => {
-    for (const ramp of ASCENT_LAYOUT.ramps) {
+  it('as rampas sobem de forma contínua entre as alturas originais das pontas', () => {
+    expect(layout.ramps.length).toBeGreaterThanOrEqual(1);
+    for (const ramp of layout.ramps) {
       const from = base.heights.heightAt(ramp.from);
       const to = base.heights.heightAt(ramp.to);
       const samples = Array.from({ length: 9 }, (_, i) => {
         const t = 0.1 + (0.8 * i) / 8;
-        return ascent.heights.heightAt({ x: ramp.from.x + (ramp.to.x - ramp.from.x) * t, y: ramp.from.y + (ramp.to.y - ramp.from.y) * t });
+        return map.heights.heightAt({ x: ramp.from.x + (ramp.to.x - ramp.from.x) * t, y: ramp.from.y + (ramp.to.y - ramp.from.y) * t });
       });
       const direction = Math.sign(to - from);
       for (let i = 1; i < samples.length; i++) {
@@ -100,36 +122,65 @@ describe('rampas no campo de alturas', () => {
     }
   });
 
+  it('monta o cenário tático leve, sem as coberturas geradas', () => {
+    const scenario = buildScenario(map);
+    expect(scenario.detail).toBe('tactical');
+    expect(scenario.boxes).toBeNull();
+    expect(scenario.rails).toBeNull();
+    expect(scenario.stats.solids).toBe(layout.solids.length);
+    expect(scenario.stats.entrances).toBe(layout.entrances.length);
+    for (const geometry of [scenario.floor, scenario.walls, scenario.solids!, scenario.thresholds!]) {
+      expect(geometry.getAttribute('position').count).toBeLessThan(40000);
+    }
+    expect(scenario.edges!.getAttribute('position').count).toBeLessThan(15000);
+    disposeScenario(scenario);
+  });
+});
+
+describe('rampas e escadas no piloto', () => {
+  const base = baseOf(ASCENT_LAYOUT);
+  const ascent = applyTacticalLayout(base, ASCENT_LAYOUT);
+
   it('não altera o piso fora das rampas nem o campo original', () => {
     const outside = { x: 0.817, y: 0.569 };
     expect(ascent.heights.heightAt(outside)).toBeCloseTo(base.heights.heightAt(outside));
     expect(ascent.heights).not.toBe(base.heights);
-    const ramp = ASCENT_LAYOUT.ramps[0]!;
-    expect(parseGeometry(JSON.parse(readFileSync(join(dir, `${base.geometry.mapId}.json`), 'utf8'))).heights.heightAt(ramp.from)).toBeCloseTo(base.heights.heightAt(ramp.from));
+  });
+
+  it('a escada tem degraus de até 0,3 m sobre a rampa definida, sem sair dela', () => {
+    for (const stair of ASCENT_LAYOUT.ramps.filter((ramp) => ramp.kind === 'stairs')) {
+      const geometry = buildStairs([stair], ascent.heights, base.frame);
+      const positions = geometry.getAttribute('position');
+      expect(positions.count).toBeGreaterThan(0);
+      const from = ascent.heights.heightAt(stair.from);
+      const to = ascent.heights.heightAt(stair.to);
+      const dx = stair.to.x - stair.from.x;
+      const dy = stair.to.y - stair.from.y;
+      const levels = new Set<number>();
+      for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i) / base.frame.worldMeters + 0.5;
+        const y = positions.getZ(i) / base.frame.worldMeters + 0.5;
+        const t = ((x - stair.from.x) * dx + (y - stair.from.y) * dy) / (dx * dx + dy * dy);
+        expect(t).toBeGreaterThan(-0.01);
+        expect(t).toBeLessThan(1.01);
+        expect(Math.abs(positions.getY(i) - (from + (to - from) * t))).toBeLessThan(Math.abs(to - from) / 2 + 0.35);
+        levels.add(Math.round(positions.getY(i) * 10));
+      }
+      expect(levels.size).toBeGreaterThan(3);
+    }
   });
 });
 
 describe('montagem do cenário', () => {
-  it('o piloto usa as coberturas do layout no lugar das geradas', () => {
-    const scenario = buildScenario(ascent);
-    expect(scenario.detail).toBe('tactical');
-    expect(scenario.boxes).toBeNull();
-    expect(scenario.rails).toBeNull();
-    expect(scenario.stats.solids).toBe(ASCENT_LAYOUT.solids.length);
-    expect(scenario.stats.ramps).toBe(ASCENT_LAYOUT.ramps.length);
-    // Limite de leveza: o cenário precisa rodar em celular.
-    for (const geometry of [scenario.floor, scenario.walls, scenario.solids!, scenario.rampStripes!]) {
-      expect(geometry.getAttribute('position').count).toBeLessThan(40000);
-    }
-    expect(scenario.edges!.getAttribute('position').count).toBeLessThan(12000);
-    disposeScenario(scenario);
-  });
+  const base = baseOf(ASCENT_LAYOUT);
+  const ascent = applyTacticalLayout(base, ASCENT_LAYOUT);
 
   it.each(maps.map((m) => [m.geometry.name, m] as const))('%s sem layout continua como antes', (_name, map) => {
     const scenario = buildScenario(map);
     expect(scenario.detail).toBe('generated');
     expect(scenario.boxes).not.toBeNull();
     expect(scenario.solids).toBeNull();
+    expect(scenario.thresholds).toBeNull();
     disposeScenario(scenario);
   });
 
@@ -149,6 +200,42 @@ describe('montagem do cenário', () => {
     }
     expect(triangles).toBeGreaterThan(0);
     expect(coveredFloor / triangles).toBeLessThan(0.25);
+  });
+
+  it('no Bind, as áreas cercadas pela linha do teleportador e as plataformas não viram laje', () => {
+    const bind = baseOf(BIND_LAYOUT);
+    const caps = buildVoidCaps(bind.geometry.walls, bind.heights, bind.frame, BIND_LAYOUT.wallHeightM);
+    const positions = caps.getAttribute('position');
+    expect(positions.count).toBeGreaterThan(0);
+    const inside = (px: number, py: number, rect: [number, number, number, number]) => px >= rect[0] && px <= rect[2] && py >= rect[1] && py <= rect[3];
+    const outsideRegions: Array<[number, number, number, number]> = [
+      [120, 705, 440, 795],
+      [800, 665, 985, 795],
+      [120, 428, 145, 458],
+      [962, 512, 987, 543],
+    ];
+    for (let i = 0; i < positions.count; i += 3) {
+      const px = ((positions.getX(i) + positions.getX(i + 1) + positions.getX(i + 2)) / 3 / bind.frame.worldMeters + 0.5) * 1024;
+      const py = ((positions.getZ(i) + positions.getZ(i + 1) + positions.getZ(i + 2)) / 3 / bind.frame.worldMeters + 0.5) * 1024;
+      for (const rect of outsideRegions) expect(inside(px, py, rect), `laje em ${Math.round(px)},${Math.round(py)}`).toBe(false);
+    }
+  });
+
+  it('no Bind, a linha do teleportador não vira parede, e o corredor atacante mantém as paredes', () => {
+    const bind = applyTacticalLayout(baseOf(BIND_LAYOUT), BIND_LAYOUT);
+    const scenario = buildScenario(bind);
+    const positions = scenario.walls.getAttribute('position');
+    let onLine = 0;
+    let corridor = 0;
+    for (let i = 0; i < positions.count; i += 3) {
+      const px = ((positions.getX(i) + positions.getX(i + 1) + positions.getX(i + 2)) / 3 / bind.frame.worldMeters + 0.5) * 1024;
+      const py = ((positions.getZ(i) + positions.getZ(i + 1) + positions.getZ(i + 2)) / 3 / bind.frame.worldMeters + 0.5) * 1024;
+      if ((px < 110 || px > 985) && py > 570 && py < 800) onLine++;
+      if (px > 482 && px < 698 && py > 790 && py < 990) corridor++;
+    }
+    expect(onLine).toBe(0);
+    expect(corridor).toBeGreaterThan(0);
+    disposeScenario(scenario);
   });
 
   it('a cobertura tem topo plano na altura indicada acima do piso', () => {

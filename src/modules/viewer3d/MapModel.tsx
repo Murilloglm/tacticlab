@@ -80,7 +80,7 @@ export function MapModel() {
   };
 
   return (
-    <group onPointerDown={onDown} userData={{ tactical: { type: 'scenario', detail: scenario.detail, solids: scenario.stats.solids, ramps: scenario.stats.ramps } }}>
+    <group onPointerDown={onDown} userData={{ tactical: { type: 'scenario', detail: scenario.detail, solids: scenario.stats.solids, ramps: scenario.stats.ramps, stairs: scenario.stats.stairs, entrances: scenario.stats.entrances } }}>
       <mesh geometry={scenario.floor} name="floor">
         {floorTexture ? (
           <meshLambertMaterial key="textured" map={floorTexture} transparent alphaTest={0.05} color="#ffffff" />
@@ -115,6 +115,16 @@ export function MapModel() {
       {scenario.rampStripes && (
         <mesh geometry={scenario.rampStripes} name="ramp-stripes" raycast={() => null}>
           <meshBasicMaterial color="#e8d9a8" side={DoubleSide} transparent opacity={0.34} depthWrite={false} />
+        </mesh>
+      )}
+      {scenario.stairs && (
+        <mesh geometry={scenario.stairs} name="stairs">
+          <meshLambertMaterial color="#b9bec6" side={DoubleSide} />
+        </mesh>
+      )}
+      {scenario.thresholds && (
+        <mesh geometry={scenario.thresholds} name="site-entrances" raycast={() => null}>
+          <meshBasicMaterial color="#ef3b48" side={DoubleSide} transparent opacity={0.55} depthWrite={false} />
         </mesh>
       )}
       {scenario.edges && !xray && (

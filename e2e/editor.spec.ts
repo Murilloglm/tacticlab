@@ -442,7 +442,7 @@ test.describe('habilidades', () => {
     await clickBoard(page, 0.6, 0.5);
 
     await expect(page.getByTestId('visual-values-note')).toContainText('não dados oficiais');
-    await expect(page.getByTestId('utility-preset')).toContainText('raio de 4,1 m');
+    await expect(page.getByTestId('utility-preset')).toContainText('raio de 4,15 m');
     for (const removed of ['utility-radius', 'utility-duration', 'utility-until-end', 'utility-travel']) {
       await expect(page.getByTestId(removed)).toHaveCount(0);
     }

@@ -124,7 +124,7 @@ export function Draft3D({ draft, color }: { draft: Draft; color: string }) {
     }
     if (draft.kind === 'utility' && draft.shape === 'wall' && cursor) {
       const lengthM = draft.previewM ?? 1;
-      const wall = wallFromGesture(draft.points[0]!, cursor, lengthM, frame);
+      const wall = wallFromGesture(draft.points[0]!, cursor, lengthM, frame, draft.previewBackM ?? 0);
       return wallEndpoints(wall.center, wall.facing, lengthM, frame);
     }
     if (draft.kind === 'utility' && draft.shape !== 'path') return cursor ? [draft.points[0]!, cursor] : draft.points;

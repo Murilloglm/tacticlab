@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { utilityDefinition } from '@/modules/abilities/definitions';
+import { utilityTravelMs } from '@/modules/abilities/timeline';
 import {
   boardToMap,
   distanceMeters,
@@ -189,17 +190,18 @@ describe('simulação determinística', () => {
     const base = { id: 'u1', ownerTokenId: null, timeMs: 3000, note: '' };
     const smoke = { ...base, agentUuid: '8e253930-4c05-31dd-1b6c-968525494517', abilitySlot: 'Ability2', shape: { type: 'circle' as const, center: { x: 0.5, y: 0.5 } } };
     const { durationMs } = utilityDefinition(smoke).timing;
-    expect(utilityStateAt(smoke, 2999)).toEqual({ started: false, active: false, progress: 0, elapsedMs: 0 });
-    expect(utilityStateAt(smoke, 3500)).toEqual({ started: true, active: true, progress: 1, elapsedMs: 500 });
-    expect(utilityStateAt(smoke, 3000 + durationMs! + 1).active).toBe(false);
+    expect(utilityStateAt(smoke, 2999, FRAME)).toEqual({ started: false, active: false, progress: 0, elapsedMs: 0, travelMs: 0 });
+    expect(utilityStateAt(smoke, 3500, FRAME)).toEqual({ started: true, active: true, progress: 1, elapsedMs: 500, travelMs: 0 });
+    expect(utilityStateAt(smoke, 3000 + durationMs! + 1, FRAME).active).toBe(false);
 
     const bolt = { ...base, agentUuid: '320b2a48-4d9b-a075-30f1-1f93a9b638fa', abilitySlot: 'Ability2', shape: { type: 'path' as const, curved: false, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }] } };
-    const { travelMs } = utilityDefinition(bolt).timing;
-    expect(utilityStateAt(bolt, 3000 + travelMs / 2).progress).toBeCloseTo(0.5);
+    const travelMs = utilityTravelMs(bolt, FRAME);
+    expect(travelMs).toBeGreaterThan(0);
+    expect(utilityStateAt(bolt, 3000 + travelMs / 2, FRAME).progress).toBeCloseTo(0.5);
     expect(utilityPathPoint(bolt, 0.5)).toEqual({ x: 0.5, y: 0 });
 
     const turret = { ...base, agentUuid: '1e58de9c-4950-5125-93e9-a0aee9f98746', abilitySlot: 'Ability2', shape: { type: 'marker' as const, point: { x: 0.5, y: 0.5 }, facing: null } };
-    expect(utilityStateAt(turret, 999999).active).toBe(true);
+    expect(utilityStateAt(turret, 999999, FRAME).active).toBe(true);
   });
 
   it('calcula o fim do conteúdo e formata o tempo', () => {

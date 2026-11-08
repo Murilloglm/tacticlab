@@ -1,41 +1,13 @@
 // Mapa piloto. Posições lidas do minimapa público (imagem de 1024 px): as coordenadas abaixo estão
 // em pixels dessa imagem. Contornos claros viraram coberturas, faixas com gradiente viraram rampas.
 // As alturas de coberturas são estimativas para leitura tática, não medidas do jogo.
-import type { SolidKind, TacticalLayout, TacticalRamp, TacticalSolid } from './types';
-
-const IMAGE = 1024;
-const n = (value: number) => value / IMAGE;
-
-const rectRing = (x0: number, y0: number, x1: number, y1: number): number[] => [n(x0), n(y0), n(x1), n(y0), n(x1), n(y1), n(x0), n(y1)];
-
-function circleRing(cx: number, cy: number, radius: number, sides = 8): number[] {
-  const ring: number[] = [];
-  for (let i = 0; i < sides; i++) {
-    const angle = (i / sides) * Math.PI * 2;
-    ring.push(n(cx + Math.cos(angle) * radius), n(cy + Math.sin(angle) * radius));
-  }
-  return ring;
-}
-
-const HEIGHT = { crate: 1.3, tallCrate: 2.3, cover: 1.1, barrier: 1.15, wall: 5, door: 2.7 };
-
-const solid = (kind: SolidKind, ring: number[], heightM: number): TacticalSolid => ({ kind, ring, heightM });
-const crate = (x0: number, y0: number, x1: number, y1: number, heightM = HEIGHT.crate) => solid('crate', rectRing(x0, y0, x1, y1), heightM);
-const cover = (x0: number, y0: number, x1: number, y1: number, heightM = HEIGHT.cover) => solid('cover', rectRing(x0, y0, x1, y1), heightM);
-const barrier = (x0: number, y0: number, x1: number, y1: number) => solid('barrier', rectRing(x0, y0, x1, y1), HEIGHT.barrier);
-const partition = (x0: number, y0: number, x1: number, y1: number) => solid('structure', rectRing(x0, y0, x1, y1), HEIGHT.wall);
-const door = (x0: number, y0: number, x1: number, y1: number) => solid('door', rectRing(x0, y0, x1, y1), HEIGHT.door);
-
-const ramp = (x0: number, y0: number, x1: number, y1: number, from: [number, number], to: [number, number]): TacticalRamp => ({
-  ring: rectRing(x0, y0, x1, y1),
-  from: { x: n(from[0]), y: n(from[1]) },
-  to: { x: n(to[0]), y: n(to[1]) },
-});
+import { ATTACKER_TINT, barrier, circleRing, cover, crate, DEFENDER_TINT, door, entrance, HEIGHT, n, partition, ramp, rectRing, solid, zone } from './builders';
+import type { TacticalLayout } from './types';
 
 export const ASCENT_LAYOUT: TacticalLayout = {
   mapId: '7eaecc1b-4337-bbf6-6ab9-04b8f06b3319',
   name: 'Ascent',
-  wallHeightM: 5.5,
+  wallHeightM: 6.5,
   solids: [
     // Site A: caixas do fundo, pilha central e cobertura longa.
     crate(255, 81, 269, 95),
@@ -94,7 +66,7 @@ export const ASCENT_LAYOUT: TacticalLayout = {
     crate(276.5, 808.5, 290, 822.5),
     crate(292.5, 805.5, 305, 819),
     solid('crate', [n(290.25), n(803.5), n(299.75), n(813), n(290.25), n(822.5), n(280.75), n(813)], HEIGHT.tallCrate),
-    barrier(346, 750, 347.5, 872),
+    // A faixa elevada a leste do site B termina em desnível aberto para o site: não há mureta.
     // B Principal e saguão.
     crate(383.5, 758.5, 398, 772.5),
     crate(398, 758.5, 405.5, 766),
@@ -119,14 +91,19 @@ export const ASCENT_LAYOUT: TacticalLayout = {
     // Do Pátio até a Passarela.
     ramp(520, 433, 554, 473, [537, 473], [537, 433]),
     // Da plataforma do site A até o piso do site.
-    ramp(271, 132, 292, 171, [271, 150], [292, 150]),
-    // Do Jardim até a Árvore.
-    ramp(326, 273, 370, 308, [326, 290], [370, 290]),
+    ramp(268, 132, 292, 171, [268, 150], [292, 150], 'stairs'),
     // Lateral elevada do site B.
     ramp(348, 700, 375, 790, [361, 700], [361, 790]),
   ],
-  zones: [
-    { ring: rectRing(43, 388, 204, 514), color: '#2fc4d6', strength: 0.22 },
-    { ring: rectRing(742, 474, 989, 650), color: '#ef3b48', strength: 0.2 },
+  entrances: [
+    // A: passagem entre as bordas do lado de A Principal e escada da plataforma.
+    entrance('A', 370, 134, 370, 172),
+    entrance('A', 285, 132, 285, 171),
+    // B: frente, ao lado do barco; desnível da faixa elevada; duas passagens da Casa de Barcos.
+    entrance('B', 213, 751, 242, 751),
+    entrance('B', 347, 779, 347, 872),
+    entrance('B', 240, 874, 254, 874),
+    entrance('B', 302, 874, 316, 874),
   ],
+  zones: [zone(43, 388, 204, 514, DEFENDER_TINT, 0.22), zone(742, 474, 989, 650, ATTACKER_TINT, 0.2)],
 };

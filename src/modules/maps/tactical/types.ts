@@ -17,12 +17,21 @@ export interface TacticalRamp {
   ring: number[];
   from: MapPoint;
   to: MapPoint;
+  /** Escada aparece em degraus; rampa, em faixas. A altura do piso é a mesma nos dois casos. */
+  kind?: 'ramp' | 'stairs';
 }
 
 export interface TacticalZone {
   ring: number[];
   color: string;
   strength: number;
+}
+
+/** Entrada de bombsite: trecho no piso por onde se chega ao site, lido do minimapa. */
+export interface TacticalEntrance {
+  site: string;
+  from: MapPoint;
+  to: MapPoint;
 }
 
 export interface TacticalLayout {
@@ -32,4 +41,10 @@ export interface TacticalLayout {
   solids: TacticalSolid[];
   ramps: TacticalRamp[];
   zones: TacticalZone[];
+  entrances: TacticalEntrance[];
+  /**
+   * Áreas em que a parede gerada não existe no jogo, como a linha do caminho do teleportador que o
+   * gerador leu como contorno no Bind.
+   */
+  wallExclusions?: number[][];
 }

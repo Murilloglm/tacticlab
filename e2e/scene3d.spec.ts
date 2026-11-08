@@ -140,7 +140,7 @@ test.describe('habilidades em 3D', () => {
     );
     const omen = abilities.find((item) => item.render === 'smoke-volume' && item.radiusM === 4.1);
     expect(omen).toBeTruthy();
-    expect(abilities.find((item) => item.render === 'wall-solid')).toMatchObject({ lengthM: 12, segments: 5 });
+    expect(abilities.find((item) => item.render === 'wall-solid')).toMatchObject({ lengthM: 10.4, segments: 4 });
   });
 
   test('o preset vale igual para todos: reposicionar não muda o tamanho no 3D', async ({ page }) => {
@@ -167,7 +167,8 @@ test.describe('habilidades em 3D', () => {
     const at = async (render: string) => (await items(page, 'ability')).find((item) => item.render === render)!;
     expect((await at('creature')).progress).toBe(0);
 
-    await seekTimeline(page, 0.05);
+    // O lobo corre 7,7 m a 8 m/s: em 0,45 s está no meio do caminho. A flecha, a 40 m/s, já chegou.
+    await seekTimeline(page, 0.015);
     await expect.poll(async () => (await at('creature')).progress as number).toBeGreaterThan(0.2);
     const running = await at('creature');
     expect(running.progress).toBeLessThan(1);
@@ -176,6 +177,42 @@ test.describe('habilidades em 3D', () => {
 
     await seekTimeline(page, 0);
     await expect.poll(async () => (await at('creature')).progress as number).toBeLessThan(0.05);
+  });
+
+  test('as smokes aparecem no tamanho real, com a da Astra maior que a do Omen e a da Brimstone', async ({ page }) => {
+    await createStrategy(page);
+    await placeAbility(page, 'Astra', 'Ability2', [[0.5, 0.5]]);
+    await placeAbility(page, 'Omen', 'Ability2', [[0.56, 0.5]]);
+    await placeAbility(page, 'Brimstone', 'Ability2', [[0.53, 0.56]]);
+    await to3D(page);
+    await expect.poll(async () => (await items(page, 'ability')).length).toBe(3);
+    const smokes = await items(page, 'ability');
+    const by = (radius: number) => smokes.find((item) => item.radiusM === radius)!;
+    const [astra, omen, brimstone] = [by(4.75), by(4.1), by(4.15)];
+    // Posicionadas no instante atual, com a timeline parada: nada de abrir pela metade.
+    for (const smoke of [astra, omen, brimstone]) expect(smoke.deploy).toBe(1);
+    expect(astra.heightM as number).toBeGreaterThan(omen.heightM as number);
+    expect(astra.heightM as number).toBeGreaterThan(brimstone.heightM as number);
+  });
+
+  test('torreta e alarme mostram cone e alcance, e o recon pulsa depois de cravar', async ({ page }) => {
+    await createStrategy(page);
+    await placeAbility(page, 'Killjoy', 'Ability2', [[0.45, 0.5]]);
+    await placeAbility(page, 'Killjoy', 'Ability1', [[0.5, 0.56]]);
+    await placeAbility(page, 'Sova', 'Ability2', [[0.58, 0.28], [0.65, 0.26]]);
+    await to3D(page);
+    await expect.poll(async () => (await items(page, 'ability')).length).toBe(3);
+    const abilities = await items(page, 'ability');
+    expect(abilities.find((item) => item.model === 'turret')).toMatchObject({ coneDegrees: 100 });
+    expect(abilities.find((item) => item.model === 'alarm-bot')).toMatchObject({ detectRadiusM: 5.5 });
+
+    // A flecha leva cerca de 0,26 s; em 0,36 s já cravou e está no primeiro pulso.
+    await seekTimeline(page, 0.012);
+    const recon = async () => (await items(page, 'ability')).find((item) => item.model === 'arrow')!;
+    await expect.poll(async () => (await recon()).landed).toBe(true);
+    expect((await recon()).pulse).not.toBeNull();
+    await seekTimeline(page, 0.3);
+    await expect.poll(async () => (await recon()).pulse).toBeNull();
   });
 
   test('reproduzindo, só aparece o que está ativo naquele instante', async ({ page }) => {
@@ -203,13 +240,26 @@ test.describe('cenário 3D', () => {
     const [scenario] = await items(page, 'scenario');
     expect(scenario!.solids).toBeGreaterThan(40);
     expect(scenario!.ramps).toBeGreaterThanOrEqual(5);
+    expect(scenario!.stairs).toBeGreaterThanOrEqual(1);
+    expect(scenario!.entrances).toBeGreaterThanOrEqual(6);
     await page.getByTestId('approximate-badge').click();
     await expect(page.getByTestId('tactical-layout-note')).toBeVisible();
     await expect(page.getByTestId('approximate-details')).toContainText('Não é o modelo do jogo');
   });
 
+  for (const name of ['Bind', 'Haven']) {
+    test(`${name} segue o padrão do piloto`, async ({ page }) => {
+      await createStrategy(page, name);
+      await to3D(page);
+      await expect.poll(async () => (await items(page, 'scenario'))[0]?.detail).toBe('tactical');
+      const [scenario] = await items(page, 'scenario');
+      expect(scenario!.solids).toBeGreaterThan(20);
+      expect(scenario!.entrances).toBeGreaterThanOrEqual(6);
+    });
+  }
+
   test('os outros mapas continuam abrindo com a geometria gerada', async ({ page }) => {
-    await createStrategy(page, 'Bind');
+    await createStrategy(page, 'Split');
     await to3D(page);
     await expect.poll(async () => (await items(page, 'scenario'))[0]?.detail).toBe('generated');
     await page.getByTestId('approximate-badge').click();

@@ -234,7 +234,7 @@ export function Draft2D({ draft, tool, color, frame, ui }: { draft: Draft; tool:
   }
   if (draft.kind === 'utility' && draft.shape === 'wall') {
     const lengthM = draft.previewM ?? 1;
-    const wall = wallFromGesture(start, cursor, lengthM, frame);
+    const wall = wallFromGesture(start, cursor, lengthM, frame, draft.previewBackM ?? 0);
     return <Line points={flat(wallEndpoints(wall.center, wall.facing, lengthM, frame))} stroke="#ffffff" strokeWidth={3 * ui} dash={[6 * ui, 4 * ui]} listening={false} />;
   }
   if (draft.kind === 'utility') {

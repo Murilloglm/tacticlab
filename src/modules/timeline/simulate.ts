@@ -142,7 +142,7 @@ export function simulate(doc: StrategyDoc, tMs: number, frame: MapFrame): Simula
   const agents: Record<string, AgentPose> = {};
   for (const agent of Object.values(doc.agents)) agents[agent.id] = agentPoseAt(agent, tMs, frame);
   const utilities: Record<string, UtilityState> = {};
-  for (const utility of Object.values(doc.utilities)) utilities[utility.id] = utilityStateAt(utility, tMs);
+  for (const utility of Object.values(doc.utilities)) utilities[utility.id] = utilityStateAt(utility, tMs, frame);
   return { timeMs: tMs, agents, utilities };
 }
 
@@ -153,7 +153,7 @@ export function contentEndMs(doc: StrategyDoc, frame: MapFrame): number {
     if (agent.route?.waypoints.length) end = Math.max(end, compileRoute(agent, frame).endMs);
   }
   for (const utility of Object.values(doc.utilities)) {
-    end = Math.max(end, utilityTravelEndMs(utility));
+    end = Math.max(end, utilityTravelEndMs(utility, frame));
   }
   for (const note of Object.values(doc.notes)) end = Math.max(end, note.timeMs);
   return end;

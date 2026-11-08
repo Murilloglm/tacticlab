@@ -30,7 +30,7 @@ O que mudou, em ordem de entrega. Os itens marcados como "visual" foram conferid
 
 ### Parcial
 
-- **Presets com valores aproximados:** 17 agentes têm ajustes por habilidade; o restante usa o padrão da categoria. Os números são estimativas para planejamento, sem conferência contra uma fonte oficial. Revisar em `definitions.ts`, o que vale para todas as estratégias de uma vez.
+- **Presets com valores aproximados:** substituído pela tabela de calibração da segunda etapa, abaixo.
 - **Modelos genéricos:** há um único boneco e 10 modelos de habilidade, compartilhados por tipo. Um dispositivo sem modelo próprio aparece como um disco ou sensor genérico.
 - **Layout do piloto:** posições lidas do minimapa, com alturas de cobertura estimadas. Precisa de revisão por alguém que conheça o mapa. Paredes internas, andares sobrepostos e portas com estado aberto ou fechado não são representados.
 - **Agentes sobre coberturas:** o piso continua sendo um campo de alturas. Um agente não sobe em uma caixa, e projéteis e câmera não colidem com o cenário.
@@ -42,10 +42,41 @@ O TacticLab é uma prancheta tática, não uma recriação do jogo. O cenário �
 
 ### A expandir
 
-- [ ] **Outros mapas:** criar o arquivo em `maps/tactical/` e registrar o UUID em `maps/tactical/index.ts`. Ordem sugerida: Bind, Haven, Split, depois o restante. Os demais usam a geometria gerada, sem alteração.
+- [x] **Bind e Haven:** feitos na segunda etapa, abaixo.
 - [ ] **Massas construídas em todos os mapas:** `buildVoidCaps` já é genérico, mas só roda em mapas com layout.
 - [ ] **Outros agentes:** revisar os presets individuais e dar modelos próprios onde a forma genérica não identifica a habilidade.
 - [ ] **Coberturas nas regras:** usar os sólidos do layout para linha de visão e para bloquear smokes e trajetórias.
+
+## Refinamento visual e calibração (segunda etapa)
+
+Os números das habilidades marcados como "wiki" vêm do wiki oficial (wiki.playvalorant.com), consultado em 2026-11-07, versão PC. Cada página indica a versão do jogo de cada valor. O jogo muda com os patches, então a tabela registra a página usada em cada linha.
+
+### Refinado
+
+- [x] **Tabela de calibração** em `abilities/calibration.ts`: categoria, agente, habilidade, escala no 2D e no 3D, altura, largura, raio, deslocamentos, duração, velocidade, arco e modelo. Cada linha diz a origem dos números e quais campos são estimativas (unit)
+- [x] **Smokes de referência:** Astra 4,75 m (14,25 s), Omen 4,1 m (15 s) e Brimstone 4,15 m (19,25 s), todas com a mesma proporção de altura e cor própria. A da Astra é a maior das três (unit, e2e)
+- [x] **Causa da "smoke pequena":** a smoke abria em 600 ms a partir de 35% do tamanho, e quem posicionava no instante atual a via sempre pela metade. Agora a abertura só acontece durante a reprodução (unit, e2e)
+- [x] **Escala geral:** as smokes ficaram mais baixas, porque a altura caiu de cerca de 1,6 vez o raio para no máximo 1,3. A ultimate da Viper passou de 20 m para 9 m. Dispositivos e criaturas crescem no máximo 2,2 vezes na visão aérea, contra até 6 vezes antes. A borda das áreas no chão baixou de 0,7 m para 0,3 m. Um teste confere os limites de todas as habilidades do catálogo (unit)
+- [x] **Trajetórias por velocidade:** lobo da Skye a 8 m/s até 6 s, Wingman a 6,3 m/s até 5 s e flecha do Sova a 40 m/s. O percurso depende do comprimento do caminho desenhado (unit, e2e)
+- [x] **Paredes do wiki:** parede da Sage com 4 blocos e 10,4 m; Viper com 60 × 4 m; Harbor com 60 × 8 m; Neon com duas paredes paralelas de 46,5 m, separadas por 3,5 m; Deadlock com duas paredes cruzadas de 10 m (unit, visual)
+- [x] **Modelos e efeitos:** smokes em volume facetado com núcleo; parede da Sage em blocos de gelo; lobo em corrida; Wingman com olho grande; torreta com cone de 100° no chão; robô de alarme com raio de 5,5 m; recon com área de 30 m e dois pulsos depois de cravar; criaturas com o alcance de visão; áreas no chão com borda e anel interno. O 2D mostra os mesmos cones, raios e cores (unit, e2e, visual)
+- [x] **Ascent:** paredes de 6,5 m, escada em degraus da plataforma do site A, que também corrige um afundamento falso no campo de alturas, e seis entradas de bombsite marcadas no piso. Também removi a mureta errada na lateral elevada do B, que é um desnível aberto para o site (unit, e2e, visual)
+- [x] **Bind:** 28 coberturas, 4 rampas, sendo uma escada, 6 entradas, plataformas dos teleportadores e zonas de surgimento. A linha do caminho dos teleportadores, que o gerador lia como parede e piso, foi removida (unit, e2e, visual)
+- [x] **Haven:** 38 coberturas, incluindo a caixa central do B e as duas portas da garagem, uma rampa, 7 entradas nos três sites e zonas de surgimento (unit, e2e, visual)
+
+### Ainda aproximado
+
+- **Valores estimados nas linhas do wiki:** a altura visível das smokes, que o wiki não informa; a altura e a espessura da parede da Sage, já que a página diz "10,4 × 1,5 m" sem dizer qual medida é a altura e o TacticLab usa 3,6 m de altura; o comprimento do Blaze, de até 21 m; a duração da Poison Cloud e da Toxic Screen, que dependem do combustível; o raio da Slow Orb e do Hot Hands; e a velocidade do lobo, da flecha e do drone.
+- **Habilidades só com o padrão da categoria:** 41 linhas cobrem 17 agentes. As demais habilidades dos 30 agentes usam padrões estimados por categoria, sem fonte. O teste de escala impede que fiquem exageradas, mas não garante o número do jogo.
+- **Trapwire:** o fio vai de parede a parede no jogo, até 15 m. Sem colisão na cena, o preset usa 7 m, uma passagem típica.
+- **Torreta:** o wiki não informa um alcance de detecção em metros. O cone usa as faixas de dano de 20 m e 35 m.
+- **Layouts:** posições lidas do minimapa, alturas de cobertura estimadas e entradas interpretadas a partir dos desenhos. O minimapa não mostra andares sobrepostos.
+
+### Precisa de revisão
+
+- **Por quem conhece os mapas:** as entradas do Bind e do Haven, a lateral elevada do site B do Ascent, as alturas das caixas e as rampas sem gradiente claro no minimapa.
+- **Habilidades sem linha na tabela:** priorizar Raze, Fade, KAY/O, Breach, Chamber, Yoru, Iso, Vyse, Tejo, Waylay e Miks, nessa ordem, conferindo cada uma no wiki oficial.
+- **Próximos mapas:** Split, Lotus e Sunset. O padrão é o mesmo: arquivo em `maps/tactical/`, registro em `maps/tactical/index.ts`, `wallExclusions` para marcas do minimapa que o gerador lê como parede e um teste próprio herdado de `tests/scenario.test.ts`.
 
 ## Concluído
 

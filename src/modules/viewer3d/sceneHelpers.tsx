@@ -12,8 +12,12 @@ import { dotTexture } from './labels';
 /** Distância a partir da qual o objeto cresce para manter um tamanho legível na tela. */
 export const SCREEN_SCALE = 40;
 
-/** Objetos pequenos crescem mais cedo: um boneco de 1,8 m some na visão aérea. */
-const MODEL_SCREEN_SCALE = 24;
+/**
+ * Objetos pequenos crescem com a distância para continuar legíveis na visão aérea, mas com teto:
+ * crescer sem limite deixava torreta, lobo e boneco com várias vezes o tamanho real.
+ */
+const MODEL_SCREEN_SCALE = 45;
+const MODEL_MAX_SCALE = 2.2;
 
 export function useGround() {
   const map = useEditor((s) => s.map);
@@ -53,7 +57,7 @@ export function useScreenScale(ref: RefObject<Object3D | null>): void {
     const object = ref.current;
     if (!object) return;
     object.getWorldPosition(worldPosition);
-    object.scale.setScalar(Math.max(1, camera.position.distanceTo(worldPosition) / MODEL_SCREEN_SCALE));
+    object.scale.setScalar(Math.min(MODEL_MAX_SCALE, Math.max(1, camera.position.distanceTo(worldPosition) / MODEL_SCREEN_SCALE)));
   });
 }
 
