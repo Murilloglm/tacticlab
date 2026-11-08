@@ -122,7 +122,7 @@ export function Draft3D({ draft, color }: { draft: Draft; color: string }) {
         return { x: cursor.x + Math.cos(angle) * radius, y: cursor.y + Math.sin(angle) * radius };
       });
     }
-    if (draft.kind === 'utility' && draft.shape === 'wall' && cursor) {
+    if (draft.kind === 'utility' && draft.shape === 'wall' && draft.previewM && cursor) {
       const lengthM = draft.previewM ?? 1;
       const wall = wallFromGesture(draft.points[0]!, cursor, lengthM, frame, draft.previewBackM ?? 0);
       return wallEndpoints(wall.center, wall.facing, lengthM, frame);

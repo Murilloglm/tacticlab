@@ -98,7 +98,7 @@ export const ASCENT_LAYOUT: TacticalLayout = {
   entrances: [
     // A: passagem entre as bordas do lado de A Principal e escada da plataforma.
     entrance('A', 370, 134, 370, 172),
-    entrance('A', 285, 132, 285, 171),
+    entrance('A', 294, 132, 294, 171),
     // B: frente, ao lado do barco; desnível da faixa elevada; duas passagens da Casa de Barcos.
     entrance('B', 213, 751, 242, 751),
     entrance('B', 347, 779, 347, 872),

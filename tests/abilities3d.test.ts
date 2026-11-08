@@ -52,9 +52,9 @@ describe('tabela de calibração', () => {
   it('a renderização de cada linha combina com a forma de posicionamento da habilidade', () => {
     const allowed: Record<string, Array<AbilityRender['kind']>> = {
       circle: ['smoke-volume', 'ground-area'],
-      wall: ['wall-solid', 'wall-energy'],
-      path: ['projectile', 'creature', 'trail'],
-      marker: ['device'],
+      wall: ['wall-solid', 'wall-energy', 'link-wire'],
+      path: ['projectile', 'creature', 'trail', 'directional-area'],
+      marker: ['device', 'wall-burst'],
     };
     for (const row of CALIBRATION.filter((item) => item.render)) {
       expect(allowed[classifyAbility(row.agentUuid, row.slot).shape], `${row.agent} ${row.ability}`).toContain(row.render!.kind);
@@ -143,9 +143,9 @@ describe('definições canônicas', () => {
     expect(definition.approximate).toBe(true);
     const allowed: Record<typeof definition.placement, Array<AbilityRender['kind']>> = {
       circle: ['smoke-volume', 'ground-area'],
-      wall: ['wall-solid', 'wall-energy'],
-      path: ['projectile', 'creature', 'trail'],
-      marker: ['device'],
+      wall: ['wall-solid', 'wall-energy', 'link-wire'],
+      path: ['projectile', 'creature', 'trail', 'directional-area'],
+      marker: ['device', 'wall-burst'],
     };
     expect(allowed[definition.placement]).toContain(definition.render.kind);
   });

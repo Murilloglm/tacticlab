@@ -78,6 +78,53 @@ Os números das habilidades marcados como "wiki" vêm do wiki oficial (wiki.play
 - **Habilidades sem linha na tabela:** priorizar Raze, Fade, KAY/O, Breach, Chamber, Yoru, Iso, Vyse, Tejo, Waylay e Miks, nessa ordem, conferindo cada uma no wiki oficial.
 - **Próximos mapas:** Split, Lotus e Sunset. O padrão é o mesmo: arquivo em `maps/tactical/`, registro em `maps/tactical/index.ts`, `wallExclusions` para marcas do minimapa que o gerador lê como parede e um teste próprio herdado de `tests/scenario.test.ts`.
 
+## Estrutura do terreno e ancoragem (terceira etapa)
+
+### Terreno estruturado
+
+Nos mapas com layout (Ascent, Bind e Haven), o piso deixou de ser um relevo suave. O campo gerado vem do tom do minimapa, desfocado, e por isso toda mudança de nível virava um "morro". Agora cada parte do piso tem um tipo:
+
+- [x] **Piso elevado e platôs:** blocos retos de altura única com bordas verticais. Diferenças de até 0,6 m entre platôs vizinhos viram um chanfro de uma célula, porque vêm da tinta do minimapa e não de estrutura do mapa. Acima disso, a borda é vertical e nítida (unit, e2e, visual)
+- [x] **Escadas:** degraus individuais de cerca de 0,28 m, com piso plano em cada degrau e espelho vertical, ocupando a escada inteira. A da torre do A no Bind desce 4,4 m em 16 degraus; a da plataforma do site A no Ascent tem 9 degraus (unit, visual)
+- [x] **Rampas:** inclinação linear, emendada sem degrau nos platôs das duas pontas (unit)
+- [x] **Coberturas:** continuam como blocos retos sobre o piso do platô onde estão
+- [x] **Bombsites:** sempre pisos planos. No Ascent, o miolo do site B tinha um "losango" de altura falsa vindo da cor do site no minimapa (unit)
+- [x] A altura usada por agentes, habilidades e câmera é exatamente a superfície desenhada, e as paredes descem até o piso mais baixo em volta, sem fresta junto a desníveis (unit)
+- [x] Correção: a "escada do Jardim para a Árvore" do Ascent tinha 0,2 m de desnível e era um erro meu de leitura; saiu do layout. A entrada do site A que ficava sobre a escada foi para o pé dela
+
+Os outros mapas continuam com o relevo gerado, sem mudança.
+
+### Ancoragem das habilidades
+
+Cada habilidade tem agora um tipo de ancoragem: no chão, em parede, projétil, objeto colocado, percurso, presa em superfície ou fio entre paredes. Os números novos vêm do wiki oficial (wiki.playvalorant.com, consultado em 2026-11-07).
+
+Passaram a ter ancoragem correta:
+
+- [x] **Breach, Aftershock:** carga presa na face da parede. Atravessa até 10 m de parede, e o cilindro de 10 m por 3 m de raio aparece do outro lado. O editor só aceita com parede a até 3 m do clique, parede atravessável nessa direção e o Breach a até 35 m. Estratégias antigas, em que ela era um círculo no chão, caem na parede mais próxima (unit, e2e, visual)
+- [x] **Breach, Flashpoint:** carga na parede, com o clarão estourando do outro lado (unit, e2e)
+- [x] **Breach, Fault Line:** faixa de 8 m de largura que começa 8 m à frente do Breach; o alvo define o comprimento, de 8 m a 56 m (unit, e2e)
+- [x] **Breach, Rolling Thunder:** faixa de 32 m por 18 m, 8 m à frente dele. O wiki confirma que é faixa, e não cone (unit)
+- [x] **Sova, Fúria do Caçador:** feixe de 66 m por 3,5 m a partir dele (unit)
+- [x] **Fade, Nightfall:** onda de 40 m por 20 m à frente dela (unit)
+- [x] **Cypher, fio:** liga as duas paredes da passagem clicada, até 15 m. Se a passagem for mais larga, o fio fica tracejado (unit, e2e)
+- [x] **Cypher, câmera; Deadlock, Sonic Sensor; Vyse, Arc Rose:** presos na parede, na altura indicada, olhando para fora. A câmera mostra o campo de visão, o sensor a área de 9 × 8 m e a Arc Rose o alcance de 10 m (unit, e2e)
+- [x] Mover uma habilidade presa mantém ela na parede. O painel mostra a ancoragem e as dicas do editor explicam como posicionar cada tipo (unit, e2e)
+
+Já estavam coerentes e só ganharam o tipo explícito: smokes e áreas no chão, torreta e robô do Killjoy (objetos colocados), flechas e drone do Sova (projéteis), lobo e Wingman (percurso).
+
+### Ainda aproximado
+
+- A máscara de piso trata caixas recortadas do minimapa como parede, então uma carga do Breach pode "atravessar" uma caixa.
+- Flashpoint: o wiki não informa o raio do clarão nem a distância em que ele estoura depois da parede; o TacticLab usa 3 m e um marcador de 1 m.
+- Câmera do Cypher: o wiki fala em giro de meio hemisfério, sem alcance; o campo de visão usa 12 m, o raio de detecção da câmera ativa.
+- Alturas de montagem na parede (2,6 m, 1,2 m e 1,5 m) são estimativas, dentro do limite de 4,5 m do wiki.
+- Rampas que o minimapa não deixa claras viram platôs com borda. A rampa da janela do B no Bind ficou como uma inclinação leve entre os dois platôs vizinhos; o campo original sugere um desnível maior que não consegui confirmar.
+
+### Precisa de revisão
+
+- **Habilidades com lógica parecida, ainda genéricas:** Yoru, Blindside, e Phoenix, Curveball, que rebatem ou contornam paredes; KAY/O, ZERO/point, que fica presa numa superfície; Raze, Boom Bot, e Neon, Relay Bolt, que quicam; Fade, Haunt; Deadlock, GravNet; Chamber, Trademark; Viper, Toxic Screen, que liga emissores; Harbor, Cascade.
+- **Terreno:** conferir no jogo as bordas que viraram chanfro no Haven, onde os desníveis são pequenos, e as plataformas declaradas que ainda faltam (`platforms` no layout).
+
 ## Concluído
 
 ### Fase 1: base

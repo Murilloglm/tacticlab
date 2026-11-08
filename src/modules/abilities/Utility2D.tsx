@@ -1,12 +1,14 @@
-// Render 2D de uma instância de habilidade, com tamanho, cor e alcances vindos da calibração.
-import { Arrow, Circle, Group, Image as KImage, Line, Wedge } from 'react-konva';
+// Render 2D de uma instância de habilidade, com tamanho, cor, alcance e ancoragem vindos da calibração.
+import { Arrow, Circle, Group, Image as KImage, Line, Star, Wedge } from 'react-konva';
 import { BOARD_SIZE, metersToMapUnits, type MapFrame, type MapPoint } from '../coordinates';
+import { useEditor } from '../editor/editorStore';
 import { Handle } from '../editor2d/entities2d';
 import { wallEndpoints } from '../strategy/factory';
 import type { Utility } from '../strategy/schema';
 import { useImage } from '../../ui/useImage';
-import { resolveRender, utilityColor, utilityDefinition } from './definitions';
-import { abilityWallLines } from './shapes';
+import { pointAhead } from './anchoring';
+import { resolveRender, utilityColor, utilityDefinition, type AbilityDefinition } from './definitions';
+import { abilityWallLines, directionalStrip, linkWireEnds, stripCorners, wallBurstShape } from './shapes';
 import { utilityPathPoint, utilityPathPoints, type UtilityState } from './timeline';
 
 const px = (p: MapPoint) => ({ x: p.x * BOARD_SIZE, y: p.y * BOARD_SIZE });
@@ -35,14 +37,42 @@ interface UtilityProps {
   ui: number;
 }
 
+function WallBurst2D({ utility, definition, frame, color, iconUrl, selected, ui, hit }: { utility: Utility; definition: AbilityDefinition; frame: MapFrame; color: string; iconUrl: string | null | undefined; selected: boolean; ui: number; hit: string }) {
+  const mask = useEditor((s) => s.map?.heights ?? null);
+  const burst = wallBurstShape(utility, definition, mask, frame);
+  if (!burst || definition.render.kind !== 'wall-burst') return null;
+  const handle = pointAhead(burst.anchor, burst.angle, 4, frame);
+  const flash = burst.flashPoint ? px(burst.flashPoint) : null;
+  return (
+    <>
+      {burst.area.length > 0 && <Line points={flat(burst.area)} closed fill={color} opacity={0.3} stroke={color} strokeWidth={1.5 * ui} hit={hit} />}
+      <Arrow points={flat([burst.anchor, burst.exit])} stroke={selected ? '#ffffff' : color} fill={selected ? '#ffffff' : color} strokeWidth={2.5 * ui} dash={[5 * ui, 3 * ui]} pointerLength={7 * ui} pointerWidth={7 * ui} listening={false} />
+      {flash && <Star x={flash.x} y={flash.y} numPoints={8} innerRadius={4 * ui} outerRadius={10 * ui} fill={color} stroke="#14161a" strokeWidth={1 * ui} hit={hit} />}
+      <AbilityGlyph url={iconUrl} point={burst.anchor} ui={ui * 0.9} color={selected ? '#ffffff' : color} hit={hit} />
+      {selected && <Handle point={handle} hit={`rotate:utilities:${utility.id}`} ui={ui} />}
+    </>
+  );
+}
+
 export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, ui }: UtilityProps) {
+  const mask = useEditor((s) => s.map?.heights ?? null);
   if (opacity <= 0) return null;
-  const definition = utilityDefinition(utility);
-  const render = resolveRender(definition, utility.shape.type);
+  const base = utilityDefinition(utility);
+  const render = resolveRender(base, utility.shape.type);
+  const definition = render === base.render ? base : { ...base, render };
   const color = utilityColor(utility);
   const hit = `utilities:${utility.id}`;
   const shape = utility.shape;
   const meters = (value: number) => metersToMapUnits(value * definition.scale2d, frame) * BOARD_SIZE;
+
+  // Habilidades de parede nunca aparecem como círculo solto no chão, nem as salvas antes da ancoragem.
+  if (base.render.kind === 'wall-burst' && (shape.type === 'marker' || shape.type === 'circle')) {
+    return (
+      <Group opacity={opacity}>
+        <WallBurst2D utility={utility} definition={base} frame={frame} color={color} iconUrl={iconUrl} selected={selected} ui={ui} hit={hit} />
+      </Group>
+    );
+  }
 
   switch (shape.type) {
     case 'circle': {
@@ -64,8 +94,24 @@ export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, u
       );
     }
     case 'wall': {
+      if (render.kind === 'link-wire') {
+        const link = linkWireEnds(utility, definition, mask, frame);
+        if (!link) return null;
+        const [a, b] = link.ends;
+        const pa = px(a);
+        const pb = px(b);
+        return (
+          <Group opacity={opacity}>
+            <Line points={flat(link.ends)} stroke={selected ? '#ffffff' : color} strokeWidth={2.5 * ui} dash={link.anchored ? undefined : [6 * ui, 4 * ui]} hit={hit} hitStrokeWidth={16 * ui} />
+            <Circle x={pa.x} y={pa.y} radius={4 * ui} fill={color} stroke="#14161a" strokeWidth={1 * ui} listening={false} />
+            <Circle x={pb.x} y={pb.y} radius={4 * ui} fill={color} stroke="#14161a" strokeWidth={1 * ui} listening={false} />
+            <AbilityGlyph url={iconUrl} point={{ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }} ui={ui * 0.85} color={color} hit={hit} />
+            {selected && <Handle point={b} hit={`rotate:utilities:${utility.id}`} ui={ui} />}
+          </Group>
+        );
+      }
       const width = Math.max(3 * ui, meters(definition.size.thicknessM));
-      const lines = abilityWallLines(shape.center, shape.facing, { ...definition, render }, frame);
+      const lines = abilityWallLines(shape.center, shape.facing, definition, frame);
       const end = wallEndpoints(shape.center, shape.facing, definition.size.lengthM, frame)[1];
       return (
         <Group opacity={opacity}>
@@ -78,6 +124,18 @@ export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, u
       );
     }
     case 'path': {
+      if (render.kind === 'directional-area') {
+        const strip = directionalStrip(utility, definition, frame);
+        if (!strip) return null;
+        return (
+          <Group opacity={opacity}>
+            <Line points={flat(strip.corners)} closed fill={color} opacity={0.3} stroke={selected ? '#ffffff' : color} strokeWidth={1.5 * ui} hit={hit} />
+            <Arrow points={flat([strip.origin, strip.start])} stroke={color} fill={color} strokeWidth={2 * ui} dash={[6 * ui, 4 * ui]} pointerLength={7 * ui} pointerWidth={7 * ui} listening={false} />
+            <AbilityGlyph url={iconUrl} point={strip.start} ui={ui} color={color} hit={hit} />
+            {selected && shape.points.map((p, i) => <Handle key={i} point={p} hit={`vertex:utilities:${utility.id}:${i}`} ui={ui} />)}
+          </Group>
+        );
+      }
       const points = utilityPathPoints(utility) ?? shape.points;
       const moving = state?.started && state.progress < 1 ? utilityPathPoint(utility, state.progress) : null;
       const end = shape.points[shape.points.length - 1]!;
@@ -114,6 +172,8 @@ export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, u
       const tipY = y + Math.sin(heading) * reach;
       const cone = render.kind === 'device' ? render.cone : undefined;
       const detect = render.kind === 'device' ? render.detectRadiusM : undefined;
+      const area = render.kind === 'device' && render.area ? stripCorners(shape.point, heading, render.area.lengthM, render.area.widthM, frame) : null;
+      const mounted = definition.anchor === 'surface';
       return (
         <Group opacity={opacity}>
           {cone && (
@@ -123,8 +183,18 @@ export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, u
             </>
           )}
           {detect && <Circle x={x} y={y} radius={meters(detect)} stroke={color} strokeWidth={1.5 * ui} dash={[6 * ui, 5 * ui]} opacity={0.8} listening={false} />}
-          {!cone && shape.facing !== null && (
+          {area && <Line points={flat(area)} closed fill={color} opacity={0.25} stroke={color} strokeWidth={1.5 * ui} listening={false} />}
+          {!cone && !area && shape.facing !== null && (
             <Arrow points={[x, y, tipX, tipY]} stroke={color} fill={color} strokeWidth={2 * ui} pointerLength={7 * ui} pointerWidth={7 * ui} listening={false} />
+          )}
+          {/* Preso na parede: um traço marca a face em que está. */}
+          {mounted && (
+            <Line
+              points={[x - Math.sin(heading) * 9 * ui, y + Math.cos(heading) * 9 * ui, x + Math.sin(heading) * 9 * ui, y - Math.cos(heading) * 9 * ui]}
+              stroke={color}
+              strokeWidth={3 * ui}
+              listening={false}
+            />
           )}
           <AbilityGlyph url={iconUrl} point={shape.point} ui={ui * 1.15 * definition.scale2d} color={selected ? '#ffffff' : color} hit={hit} />
           {selected && <Handle point={{ x: tipX / BOARD_SIZE, y: tipY / BOARD_SIZE }} hit={`rotate:utilities:${utility.id}`} ui={ui} />}
@@ -133,3 +203,4 @@ export function Utility2D({ utility, state, opacity, frame, iconUrl, selected, u
     }
   }
 }
+

@@ -1,6 +1,6 @@
 // O que a cena 3D mostra de fato. Lê o grafo de objetos pelo inventário da cena, não o documento.
 import { expect, test, type Page } from '@playwright/test';
-import { boardPoint, clickBoard, createStrategy, placeAgent, savedDoc, sceneItems, seekTimeline, singleAgent, stubNetwork, timelineMs, to2D, to3D, trackErrors, type SceneItem } from './helpers';
+import { boardPoint, clickBoard, createStrategy, dragBoard, placeAgent, savedDoc, sceneItems, seekTimeline, singleAgent, stubNetwork, timelineMs, to2D, to3D, trackErrors, type SceneItem } from './helpers';
 
 const WORLD_METERS = 142.86;
 
@@ -232,6 +232,74 @@ test.describe('habilidades em 3D', () => {
   });
 });
 
+test.describe('ancoragem das habilidades', () => {
+  test('a carga do Breach fica na parede e o efeito sai do outro lado, nos dois modos', async ({ page }) => {
+    const id = await createStrategy(page);
+    await placeAgent(page, 'Breach', 'attack', 0.48, 0.35);
+    await page.getByTestId('tab-abilities').click();
+    await page.getByTestId('ability-Grenade').click();
+    await expect(page.getByTestId('hint-bar')).toContainText('parede');
+    await clickBoard(page, 0.45, 0.35);
+    await expect(page.getByTestId('utility-anchor')).toHaveAttribute('data-anchor', 'wall');
+    const utility = Object.values((await savedDoc(page, id)).utilities)[0]!;
+    expect(utility.shape.type).toBe('marker');
+    // Presa na face da parede, mirando a partir do Breach: atravessa para oeste.
+    expect((utility.shape as unknown as { point: { x: number } }).point.x).toBeLessThan(0.45);
+    expect(Math.cos(utility.shape.facing as number)).toBeLessThan(-0.9);
+
+    await to3D(page);
+    await expect.poll(async () => (await items(page, 'ability')).length).toBe(1);
+    const burst = (await items(page, 'ability'))[0]!;
+    expect(burst).toMatchObject({ render: 'wall-burst', effect: 'blast', anchor: 'wall', throughWall: true, lengthM: 10, radiusM: 3 });
+    expect(burst.exitX as number).toBeLessThan(burst.anchorX as number);
+  });
+
+  test('longe de uma parede, a habilidade de parede não é colocada solta no chão', async ({ page }) => {
+    const id = await createStrategy(page);
+    await page.getByTestId('tab-abilities').click();
+    await page.getByTestId('ability-agent-select').selectOption({ label: 'Breach' });
+    await page.getByTestId('ability-Grenade').click();
+    await clickBoard(page, 0.83, 0.56);
+    await expect(page.getByTestId('toast-info')).toContainText('parede');
+    expect(Object.keys((await savedDoc(page, id)).utilities)).toHaveLength(0);
+  });
+
+  test('a Fault Line sai 8 m à frente do Breach e o alvo define o comprimento', async ({ page }) => {
+    await createStrategy(page);
+    await placeAgent(page, 'Breach', 'attack', 0.5, 0.5);
+    await page.getByTestId('tab-abilities').click();
+    await page.getByTestId('ability-Ability2').click();
+    await clickBoard(page, 0.7, 0.5);
+    await to3D(page);
+    await expect.poll(async () => (await items(page, 'ability')).length).toBe(1);
+    const strip = (await items(page, 'ability'))[0]!;
+    expect(strip).toMatchObject({ render: 'directional-area', startM: 8, widthM: 8 });
+    expect(strip.lengthM as number).toBeCloseTo(0.2 * WORLD_METERS - 8, 0);
+  });
+
+  test('câmera presa na parede e fio de parede a parede', async ({ page }) => {
+    await createStrategy(page);
+    await page.getByTestId('tab-abilities').click();
+    await page.getByTestId('ability-agent-select').selectOption({ label: 'Cypher' });
+    await page.getByTestId('ability-Ability2').click();
+    await clickBoard(page, 0.45, 0.35);
+    await expect(page.getByTestId('utility-anchor')).toHaveAttribute('data-anchor', 'surface');
+    await page.getByTestId('tab-abilities').click();
+    await page.getByTestId('ability-agent-select').selectOption({ label: 'Cypher' });
+    await page.getByTestId('ability-Grenade').click();
+    await dragBoard(page, [0.39, 0.7], [0.41, 0.7]);
+    await expect(page.getByTestId('utility-anchor')).toHaveAttribute('data-anchor', 'link');
+    await to3D(page);
+    await expect.poll(async () => (await items(page, 'ability')).length).toBe(2);
+    const abilities = await items(page, 'ability');
+    expect(abilities.find((item) => item.render === 'device')).toMatchObject({ anchor: 'surface', mounted: true, liftM: 2.6, coneDegrees: 180 });
+    const wire = abilities.find((item) => item.render === 'link-wire')!;
+    expect(wire).toMatchObject({ anchor: 'link', anchored: true });
+    expect(wire.lengthM as number).toBeGreaterThan(4);
+    expect(wire.lengthM as number).toBeLessThan(10);
+  });
+});
+
 test.describe('cenário 3D', () => {
   test('o mapa piloto usa o layout tático', async ({ page }) => {
     await createStrategy(page, 'Ascent');
@@ -242,6 +310,9 @@ test.describe('cenário 3D', () => {
     expect(scenario!.ramps).toBeGreaterThanOrEqual(5);
     expect(scenario!.stairs).toBeGreaterThanOrEqual(1);
     expect(scenario!.entrances).toBeGreaterThanOrEqual(6);
+    // Terreno estruturado: platôs retos com bordas, no lugar do relevo suave.
+    expect(scenario!.plateaus).toBeGreaterThan(3);
+    expect(scenario!.ledges).toBe(true);
     await page.getByTestId('approximate-badge').click();
     await expect(page.getByTestId('tactical-layout-note')).toBeVisible();
     await expect(page.getByTestId('approximate-details')).toContainText('Não é o modelo do jogo');

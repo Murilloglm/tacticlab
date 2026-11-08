@@ -97,6 +97,13 @@ const BUILDERS: Record<AbilityModelId, (accent: string) => Part[]> = {
     { geometry: ball(0.17, 1), at: v(0, 0.98, 0), color: accent },
     { geometry: box(0.03, 0.05, 0.14), at: v(0.16, 1, 0), color: LIGHT },
   ],
+  // Dispositivo de parede (câmera, sensor, carga): placa encostada na parede em -X e lente em +X.
+  mount: (accent) => [
+    { geometry: box(0.06, 0.44, 0.44), at: v(-0.03, 0, 0), color: DARK },
+    { geometry: box(0.22, 0.3, 0.3), at: v(0.1, 0, 0), color: accent },
+    { geometry: cylinder(0.09, 0.09, 0.08, 8), at: v(0.25, 0, 0), rotate: v(0, 0, Math.PI / 2), color: DARK },
+    { geometry: ball(0.06, 0), at: v(0.3, 0, 0), color: LIGHT },
+  ],
   puck: (accent) => [
     { geometry: cylinder(0.3, 0.34, 0.14, 8), at: v(0, 0.08, 0), color: DARK },
     { geometry: cylinder(0.18, 0.24, 0.16, 8), at: v(0, 0.23, 0), color: accent },
@@ -172,6 +179,14 @@ export function segmentedWallGeometry(lengthM: number, heightM: number, thicknes
   const geometry = mergeParts(parts);
   wallCache.set(key, geometry);
   return geometry;
+}
+
+let blastCylinder: BufferGeometry | null = null;
+
+/** Cilindro deitado ao longo de X, de raio 1 e comprimento 1, começando em x = 0: a explosão que sai da parede. */
+export function blastCylinderGeometry(): BufferGeometry {
+  if (!blastCylinder) blastCylinder = new CylinderGeometry(1, 1, 1, 18, 1, false).rotateZ(-Math.PI / 2).translate(0.5, 0, 0);
+  return blastCylinder;
 }
 
 const rimCache = new Map<number, BufferGeometry>();

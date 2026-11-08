@@ -27,6 +27,12 @@ export interface TacticalZone {
   strength: number;
 }
 
+/** Piso elevado declarado: bloco reto com bordas verticais, na altura dada ou na mediana do campo. */
+export interface TacticalPlatform {
+  ring: number[];
+  heightM?: number;
+}
+
 /** Entrada de bombsite: trecho no piso por onde se chega ao site, lido do minimapa. */
 export interface TacticalEntrance {
   site: string;
@@ -42,6 +48,7 @@ export interface TacticalLayout {
   ramps: TacticalRamp[];
   zones: TacticalZone[];
   entrances: TacticalEntrance[];
+  platforms?: TacticalPlatform[];
   /**
    * Áreas em que a parede gerada não existe no jogo, como a linha do caminho do teleportador que o
    * gerador leu como contorno no Bind.

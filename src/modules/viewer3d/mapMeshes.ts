@@ -3,6 +3,7 @@
 import { BufferAttribute, BufferGeometry, Color, ShapeUtils, Vector2 } from 'three';
 import type { MapFrame, MapPoint } from '../coordinates';
 import { pointInRing, type HeightField, type MapGeometry } from '../maps/geometry';
+import { CELL_RAMP, CELL_STAIRS, slopeHeight, type StructuredHeightField } from '../maps/terrain';
 import type { TacticalRamp, TacticalSolid, TacticalZone } from '../maps/tactical/types';
 
 /** Alturas esquemáticas, em metros. Não vêm do jogo; servem para dar leitura ao volume. */
@@ -107,6 +108,7 @@ export function buildExtrudedGeometry(
   heights: HeightField,
   frame: MapFrame,
   extrude: number,
+  bottomAt?: (point: MapPoint) => number,
 ): BufferGeometry {
   const S = frame.worldMeters;
   const positions: number[] = [];
@@ -114,7 +116,8 @@ export function buildExtrudedGeometry(
   const push = (x: number, y: number, z: number) => positions.push(x, y, z);
   const world = (p: Vector2) => {
     const ground = heights.heightAt({ x: p.x, y: p.y });
-    return { x: (p.x - 0.5) * S, z: (p.y - 0.5) * S, bottom: ground - 0.15, top: ground + extrude };
+    const bottom = bottomAt ? bottomAt({ x: p.x, y: p.y }) : ground - 0.15;
+    return { x: (p.x - 0.5) * S, z: (p.y - 0.5) * S, bottom, top: ground + extrude };
   };
 
   for (const polygon of polygons) {
@@ -347,56 +350,162 @@ export function buildRampStripes(ramps: TacticalRamp[], heights: HeightField, fr
   return result;
 }
 
-/** Eixo e largura de uma rampa: direção de subida e extensão na perpendicular. */
-function rampAxes(ramp: TacticalRamp) {
-  const dx = ramp.to.x - ramp.from.x;
-  const dy = ramp.to.y - ramp.from.y;
-  const length = Math.hypot(dx, dy);
-  const ux = length ? dx / length : 1;
-  const uy = length ? dy / length : 0;
-  let min = Infinity;
-  let max = -Infinity;
-  for (const p of ringToVectors(ramp.ring)) {
-    const across = -(p.x - ramp.from.x) * uy + (p.y - ramp.from.y) * ux;
-    min = Math.min(min, across);
-    max = Math.max(max, across);
-  }
-  return { length, ux, uy, min, max };
-}
-
 /**
- * Degraus sobre as escadas do layout: piso de cada degrau na altura do fim dele e espelho vertical.
- * O campo de alturas continua linear; os degraus são só a leitura visual, até 0,3 m acima dele.
+ * Escadas do terreno estruturado: um piso plano por degrau e um espelho vertical entre eles, nas
+ * mesmas alturas que o terreno devolve para agentes e habilidades. Os limites estão alinhados à grade.
  */
-export function buildStairs(ramps: TacticalRamp[], heights: HeightField, frame: MapFrame, riseM = 0.3): BufferGeometry {
+export function buildTerrainStairs(terrain: StructuredHeightField, frame: MapFrame): BufferGeometry {
   const S = frame.worldMeters;
   const positions: number[] = [];
   const quad = (a: number[], b: number[], c: number[], d: number[]) => positions.push(...a, ...b, ...c, ...a, ...c, ...d);
-  for (const ramp of ramps.filter((r) => r.kind === 'stairs')) {
-    const { length, ux, uy, min, max } = rampAxes(ramp);
-    if (length === 0) continue;
-    const from = heights.heightAt(ramp.from);
-    const to = heights.heightAt(ramp.to);
-    const steps = Math.max(2, Math.round(Math.abs(to - from) / riseM));
-    const at = (along: number, across: number, height: number) => {
-      const x = ramp.from.x + ux * along - uy * across;
-      const y = ramp.from.y + uy * along + ux * across;
+  for (const slope of terrain.slopes.filter((item) => item.kind === 'stairs')) {
+    const alongX = Math.abs(slope.to.x - slope.from.x) >= Math.abs(slope.to.y - slope.from.y);
+    const { x0, y0, x1, y1 } = slope.bounds;
+    // Eixo de subida (along) e largura (across), em coordenadas de mapa.
+    const aFrom = alongX ? slope.from.x : slope.from.y;
+    const aTo = alongX ? slope.to.x : slope.to.y;
+    const [aMin, aMax] = alongX ? [x0, x1] : [y0, y1];
+    const [cMin, cMax] = alongX ? [y0, y1] : [x0, x1];
+    const point = (along: number, across: number, height: number) => {
+      const x = alongX ? along : across;
+      const y = alongX ? across : along;
       return [(x - 0.5) * S, height, (y - 0.5) * S];
     };
-    for (let i = 0; i < steps; i++) {
-      const a0 = (i / steps) * length;
-      const a1 = ((i + 1) / steps) * length;
-      // Subindo, o degrau tem a altura do fim do trecho; descendo, a do começo.
-      const tread = from + ((to - from) * (to > from ? i + 1 : i)) / steps + 0.02;
-      const previous = from + ((to - from) * (to > from ? i : i - 1)) / steps + 0.02;
-      quad(at(a0, min, tread), at(a1, min, tread), at(a1, max, tread), at(a0, max, tread));
-      if (i > 0 || to > from) quad(at(a0, min, Math.min(previous, tread)), at(a0, max, Math.min(previous, tread)), at(a0, max, Math.max(previous, tread)), at(a0, min, Math.max(previous, tread)));
+    const sign = aTo >= aFrom ? 1 : -1;
+    const start = sign > 0 ? aMin : aMax;
+    const end = sign > 0 ? aMax : aMin;
+    let previous: number | null = null;
+    for (let k = 0; k < slope.steps; k++) {
+      // Os degraus das pontas se estendem até o limite da escada.
+      const a0 = k === 0 ? start : aFrom + ((aTo - aFrom) * k) / slope.steps;
+      const a1 = k === slope.steps - 1 ? end : aFrom + ((aTo - aFrom) * (k + 1)) / slope.steps;
+      const middle = (a0 + a1) / 2;
+      const tread = slopeHeight(slope, alongX ? { x: middle, y: (cMin + cMax) / 2 } : { x: (cMin + cMax) / 2, y: middle }) + 0.01;
+      quad(point(a0, cMin, tread), point(a1, cMin, tread), point(a1, cMax, tread), point(a0, cMax, tread));
+      const below = previous ?? slope.fromM;
+      if (Math.abs(below - tread) > 0.005) quad(point(a0, cMin, Math.min(below, tread)), point(a0, cMax, Math.min(below, tread)), point(a0, cMax, Math.max(below, tread)), point(a0, cMin, Math.max(below, tread)));
+      previous = tread;
     }
   }
   const result = new BufferGeometry();
   result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   result.computeVertexNormals();
   return result;
+}
+
+const LEDGE_LOW = new Color('#2f343c');
+const LEDGE_HIGH = new Color('#59606b');
+const RAMP_TINT = new Color('#c9b98f');
+
+/**
+ * Piso do terreno estruturado: topo plano por platô, rampas inclinadas e faces verticais nas bordas
+ * entre níveis. Os degraus ficam por conta de buildTerrainStairs.
+ */
+export function buildStructuredFloor(geometry: MapGeometry, terrain: StructuredHeightField, frame: MapFrame, zones: TacticalZone[] = []): { floor: BufferGeometry; ledges: BufferGeometry } {
+  const G = terrain.size;
+  const S = frame.worldMeters;
+  const span = Math.max(geometry.heightSpanMeters, 3);
+  const included = new Uint8Array(G * G);
+  for (let gy = 0; gy < G; gy++) {
+    for (let gx = 0; gx < G; gx++) {
+      if (!terrain.isFloorCell(gx, gy)) continue;
+      // Uma célula a mais de margem passa por baixo das paredes e esconde o serrilhado da grade.
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const x = gx + dx;
+          const y = gy + dy;
+          if (x >= 0 && y >= 0 && x < G && y < G) included[y * G + x] = 1;
+        }
+      }
+    }
+  }
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const indices: number[] = [];
+  const vertexIndex = new Map<string, number>();
+  const color = new Color();
+  const zoneColor = new Color();
+  const tint = (x: number, y: number, height: number, ramp: boolean) => {
+    color.copy(FLOOR_LOW).lerp(FLOOR_HIGH, Math.min(1, Math.max(0, height / span)));
+    if (ramp) color.lerp(RAMP_TINT, 0.25);
+    if (isSitePoint(geometry, x, y)) color.lerp(SITE_TINT, 0.55);
+    for (const zone of zones) if (pointInRing(x, y, zone.ring)) color.lerp(zoneColor.set(zone.color), zone.strength);
+    return color;
+  };
+  const vertex = (vx: number, vy: number, height: number, ramp: boolean) => {
+    const key = `${vx},${vy},${Math.round(height * 1000)},${ramp ? 1 : 0}`;
+    const existing = vertexIndex.get(key);
+    if (existing !== undefined) return existing;
+    const x = vx / G;
+    const y = vy / G;
+    positions.push((x - 0.5) * S, height, (y - 0.5) * S);
+    const c = tint(x, y, height, ramp);
+    colors.push(c.r, c.g, c.b);
+    const index = positions.length / 3 - 1;
+    vertexIndex.set(key, index);
+    return index;
+  };
+  const corners = (gx: number, gy: number) => [terrain.cornerHeight(gx, gy, 0, 0), terrain.cornerHeight(gx, gy, 1, 0), terrain.cornerHeight(gx, gy, 1, 1), terrain.cornerHeight(gx, gy, 0, 1)];
+
+  for (let gy = 0; gy < G; gy++) {
+    for (let gx = 0; gx < G; gx++) {
+      if (!included[gy * G + gx]) continue;
+      const kind = terrain.kindOfCell(gx, gy);
+      if (kind === CELL_STAIRS) continue;
+      const [h00, h10, h11, h01] = corners(gx, gy) as [number, number, number, number];
+      const ramp = kind === CELL_RAMP;
+      const a = vertex(gx, gy, h00, ramp);
+      const b = vertex(gx + 1, gy, h10, ramp);
+      const c = vertex(gx + 1, gy + 1, h11, ramp);
+      const d = vertex(gx, gy + 1, h01, ramp);
+      indices.push(a, d, b, b, d, c);
+    }
+  }
+
+  // Bordas: face vertical onde os cantos de duas células vizinhas não coincidem.
+  const ledgePositions: number[] = [];
+  const ledgeColors: number[] = [];
+  const ledgeColor = new Color();
+  const pushLedge = (points: number[][]) => {
+    for (const p of points) {
+      ledgePositions.push(...p);
+      ledgeColor.copy(LEDGE_LOW).lerp(LEDGE_HIGH, Math.min(1, Math.max(0, p[1]! / span)));
+      ledgeColors.push(ledgeColor.r, ledgeColor.g, ledgeColor.b);
+    }
+  };
+  const edge = (p0: [number, number], p1: [number, number], a0: number, a1: number, b0: number, b1: number) => {
+    if (Math.abs(a0 - b0) < 0.02 && Math.abs(a1 - b1) < 0.02) return;
+    const w = (p: [number, number], h: number) => [(p[0] / G - 0.5) * S, h, (p[1] / G - 0.5) * S];
+    pushLedge([w(p0, a0), w(p1, a1), w(p1, b1), w(p0, a0), w(p1, b1), w(p0, b0)]);
+  };
+  for (let gy = 0; gy < G; gy++) {
+    for (let gx = 0; gx < G; gx++) {
+      if (!included[gy * G + gx]) continue;
+      const here = corners(gx, gy);
+      const stairs = terrain.kindOfCell(gx, gy) === CELL_STAIRS;
+      if (gx + 1 < G && included[gy * G + gx + 1] && !(stairs && terrain.kindOfCell(gx + 1, gy) === CELL_STAIRS)) {
+        const there = corners(gx + 1, gy);
+        edge([gx + 1, gy], [gx + 1, gy + 1], here[1]!, here[2]!, there[0]!, there[3]!);
+      }
+      if (gy + 1 < G && included[(gy + 1) * G + gx] && !(stairs && terrain.kindOfCell(gx, gy + 1) === CELL_STAIRS)) {
+        const there = corners(gx, gy + 1);
+        edge([gx, gy + 1], [gx + 1, gy + 1], here[3]!, here[2]!, there[0]!, there[1]!);
+      }
+    }
+  }
+
+  const floor = new BufferGeometry();
+  floor.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  floor.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
+  floor.setAttribute('uv', new BufferAttribute(new Float32Array((positions.length / 3) * 2).map((_, i) => (i % 2 === 0 ? positions[(i / 2) * 3]! / S + 0.5 : 0.5 - positions[((i - 1) / 2) * 3 + 2]! / S)), 2));
+  floor.setIndex(indices);
+  floor.computeVertexNormals();
+  const ledges = new BufferGeometry();
+  ledges.setAttribute('position', new BufferAttribute(new Float32Array(ledgePositions), 3));
+  ledges.setAttribute('color', new BufferAttribute(new Float32Array(ledgeColors), 3));
+  ledges.computeVertexNormals();
+  return { floor, ledges };
 }
 
 /** Faixas no piso marcando as entradas dos sites. */
@@ -540,6 +649,39 @@ export function buildGroundSector(
       indices.push(a, c, b, b, c, d);
     }
   }
+  const result = new BufferGeometry();
+  result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  result.setIndex(indices);
+  result.computeVertexNormals();
+  return result;
+}
+
+/** Quadrilátero no chão (faixa direcional, área de explosão), subdividido para acompanhar o terreno. */
+export function buildGroundQuad(corners: MapPoint[], frame: MapFrame, heights: HeightField | null, lift = 0.12, stepM = 1.5): BufferGeometry {
+  const S = frame.worldMeters;
+  const [a, b, c, d] = corners as [MapPoint, MapPoint, MapPoint, MapPoint];
+  const lengthM = Math.hypot(b.x - a.x, b.y - a.y) * S;
+  const widthM = Math.hypot(d.x - a.x, d.y - a.y) * S;
+  const nu = Math.max(1, Math.min(64, Math.round(lengthM / stepM)));
+  const nv = Math.max(1, Math.min(32, Math.round(widthM / stepM)));
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let j = 0; j <= nv; j++) {
+    for (let i = 0; i <= nu; i++) {
+      const u = i / nu;
+      const v = j / nv;
+      const x = a.x + (b.x - a.x) * u + (d.x - a.x) * v;
+      const y = a.y + (b.y - a.y) * u + (d.y - a.y) * v;
+      positions.push((x - 0.5) * S, (heights?.heightAt({ x, y }) ?? 0) + lift, (y - 0.5) * S);
+    }
+  }
+  for (let j = 0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      const p = j * (nu + 1) + i;
+      indices.push(p, p + nu + 1, p + 1, p + 1, p + nu + 1, p + nu + 2);
+    }
+  }
+  void c;
   const result = new BufferGeometry();
   result.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   result.setIndex(indices);

@@ -97,7 +97,7 @@ O resultado é **aproximado** e identificado assim na interface. Não é o model
 
 A categoria de cada habilidade (smoke, flash etc.) é uma curadoria própria, em `abilities/taxonomy.ts`. A API não fornece alcance nem duração, então tamanho e tempo são presets fixos do TacticLab, na tabela de calibração `abilities/calibration.ts`, que registra a origem de cada número (wiki oficial ou estimativa): são aproximações, rotuladas como não oficiais, e o usuário ajusta só posição, direção, trajetória e instante. Corrigir um preset vale para todas as estratégias, porque nenhuma guarda cópia dele.
 
-Ascent, Bind e Haven têm layout tático em `maps/tactical/`, com coberturas, portas, escadas, rampas e entradas de bombsite lidas do minimapa. Os outros mapas usam a geometria gerada. Para expandir, crie o arquivo do mapa nessa pasta e registre o UUID em `maps/tactical/index.ts`.
+Ascent, Bind e Haven têm layout tático em `maps/tactical/`, com coberturas, portas, escadas, rampas e entradas de bombsite lidas do minimapa, e terreno estruturado (`maps/terrain.ts`): platôs retos, escadas em degraus e rampas, no lugar do relevo suave. Os outros mapas usam a geometria gerada. Cada habilidade tem um tipo de ancoragem (no chão, em parede, projétil, objeto, percurso, superfície ou fio), e as de parede usam `abilities/anchoring.ts` para achar a parede e o outro lado. Para expandir, crie o arquivo do mapa nessa pasta e registre o UUID em `maps/tactical/index.ts`.
 
 Agentes novos aparecem automaticamente, com as habilidades marcadas como "Não classificada" até entrarem na tabela. Mapas novos aparecem no 2D e precisam de `npm run maps:generate` para ter cenário 3D.
 

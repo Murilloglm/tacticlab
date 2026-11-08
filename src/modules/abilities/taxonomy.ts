@@ -29,7 +29,7 @@ export const ABILITY_TAXONOMY: Record<string, AgentRules> = {
   '5f8d3a7f-467b-97f3-062c-13acf203c006': {
     Ability1: rule('flash', 'marker'),
     Ability2: rule('area', 'path'),
-    Grenade: rule('area', 'circle'),
+    Grenade: rule('area', 'marker'),
     Ultimate: rule('area', 'path'),
   },
   // Brimstone

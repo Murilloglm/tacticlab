@@ -2,10 +2,10 @@
 // da tabela de calibração (calibration.ts) sobre a classificação tática (taxonomy.ts).
 // A instância salva na estratégia guarda só posição, direção, trajetória e instante.
 import type { AbilityCategory, Utility } from '../strategy/schema';
-import { CATEGORY_CALIBRATION, calibrationRow, type AbilityModelId, type AbilityRender, type CalibratedField } from './calibration';
+import { CATEGORY_CALIBRATION, calibrationRow, type AbilityAnchor, type AbilityModelId, type AbilityRender, type CalibratedField } from './calibration';
 import { CATEGORY_COLOR, classifyAbility, type AbilityShapeKind } from './taxonomy';
 
-export type { AbilityModelId, AbilityRender };
+export type { AbilityAnchor, AbilityModelId, AbilityRender };
 
 export interface AbilitySize {
   /** Raio de volumes e áreas. */
@@ -49,6 +49,8 @@ export interface AbilityDefinition {
   timing: AbilityTiming;
   trajectory: AbilityTrajectory;
   render: AbilityRender;
+  /** Como a habilidade se prende ao mapa. */
+  anchor: AbilityAnchor;
   /** Cor própria da habilidade. Nula: usa a cor da categoria. */
   tint: string | null;
   source: 'wiki' | 'estimate';
@@ -56,6 +58,25 @@ export interface AbilityDefinition {
   /** Campos que vêm de estimativa, e não da fonte. */
   estimated: CalibratedField[];
   approximate: true;
+}
+
+/** Ancoragem padrão, pela forma de renderizar. */
+export function defaultAnchor(render: AbilityRender): AbilityAnchor {
+  switch (render.kind) {
+    case 'device':
+      return 'placement';
+    case 'projectile':
+      return 'projectile';
+    case 'creature':
+    case 'trail':
+      return 'path';
+    case 'wall-burst':
+      return 'wall';
+    case 'link-wire':
+      return 'link';
+    default:
+      return 'ground';
+  }
 }
 
 /** Representação padrão: depende da categoria e de como a habilidade é posicionada. */
@@ -86,6 +107,7 @@ export function abilityDefinition(agentUuid: string, slot: string): AbilityDefin
   const base = CATEGORY_CALIBRATION[info.category];
   const row = calibrationRow(agentUuid, slot);
   const trajectory = { ...base.trajectory, ...row?.trajectory };
+  const render = row?.render ?? defaultRender(info.category, info.shape);
   const definition: AbilityDefinition = {
     agentUuid,
     slot,
@@ -109,7 +131,8 @@ export function abilityDefinition(agentUuid: string, slot: string): AbilityDefin
       afterArrivalMs: row?.afterArrivalMs ?? null,
     },
     trajectory: { speedMps: trajectory.speedMps ?? null, maxTravelMs: trajectory.maxTravelMs ?? null, arcM: trajectory.arcM ?? 0 },
-    render: row?.render ?? defaultRender(info.category, info.shape),
+    render,
+    anchor: row?.anchor ?? defaultAnchor(render),
     tint: row?.tint ?? null,
     source: row?.source ?? 'estimate',
     reference: row?.reference ?? null,
@@ -143,11 +166,15 @@ export function presetSummary(definition: AbilityDefinition): string {
   const parts: string[] = [];
   const { render } = definition;
   if (definition.placement === 'circle') parts.push(`raio de ${number(definition.size.radiusM)} m`);
-  if (definition.placement === 'wall') parts.push(`${number(definition.size.lengthM)} m de comprimento`);
-  if (definition.placement === 'path') {
+  if (definition.placement === 'wall' && render.kind !== 'link-wire') parts.push(`${number(definition.size.lengthM)} m de comprimento`);
+  if (definition.placement === 'path' && render.kind !== 'directional-area') {
     if (definition.trajectory.speedMps) parts.push(`${number(definition.trajectory.speedMps)} m/s`);
     else if (definition.timing.travelMs > 0) parts.push(`percurso de ${number(definition.timing.travelMs / 1000)} s`);
   }
+  if (render.kind === 'wall-burst') parts.push(render.effect === 'blast' ? `atravessa até ${number(render.maxDepthM)} m de parede, área de ${number(render.lengthM)} × ${number(render.radiusM * 2)} m do outro lado` : `atravessa até ${number(render.maxDepthM)} m de parede e estoura do outro lado`);
+  if (render.kind === 'directional-area') parts.push(render.aimed ? `faixa de ${number(render.widthM)} m de largura, de ${number(render.minLengthM ?? 0)} a ${number(render.lengthM)} m` : `faixa de ${number(render.lengthM)} × ${number(render.widthM)} m`);
+  if (render.kind === 'link-wire') parts.push(`fio de parede a parede, até ${number(render.maxLengthM)} m`);
+  if (render.kind === 'device' && render.area) parts.push(`área de ${number(render.area.lengthM)} × ${number(render.area.widthM)} m`);
   if (render.kind === 'device' && render.cone) parts.push(`cone de ${render.cone.degrees}°`);
   if (render.kind === 'device' && render.detectRadiusM) parts.push(`detecção de ${number(render.detectRadiusM)} m`);
   if (render.kind === 'projectile' && render.revealRadiusM) parts.push(`revela até ${number(render.revealRadiusM)} m`);

@@ -80,7 +80,7 @@ export function MapModel() {
   };
 
   return (
-    <group onPointerDown={onDown} userData={{ tactical: { type: 'scenario', detail: scenario.detail, solids: scenario.stats.solids, ramps: scenario.stats.ramps, stairs: scenario.stats.stairs, entrances: scenario.stats.entrances } }}>
+    <group onPointerDown={onDown} userData={{ tactical: { type: 'scenario', detail: scenario.detail, solids: scenario.stats.solids, ramps: scenario.stats.ramps, stairs: scenario.stats.stairs, entrances: scenario.stats.entrances, plateaus: scenario.stats.plateaus, ledges: Boolean(scenario.ledges) } }}>
       <mesh geometry={scenario.floor} name="floor">
         {floorTexture ? (
           <meshLambertMaterial key="textured" map={floorTexture} transparent alphaTest={0.05} color="#ffffff" />
@@ -117,9 +117,14 @@ export function MapModel() {
           <meshBasicMaterial color="#e8d9a8" side={DoubleSide} transparent opacity={0.34} depthWrite={false} />
         </mesh>
       )}
+      {scenario.ledges && (
+        <mesh geometry={scenario.ledges} name="ledges">
+          <meshLambertMaterial vertexColors side={DoubleSide} />
+        </mesh>
+      )}
       {scenario.stairs && (
         <mesh geometry={scenario.stairs} name="stairs">
-          <meshLambertMaterial color="#b9bec6" side={DoubleSide} />
+          <meshLambertMaterial color="#c3c8cf" side={DoubleSide} flatShading />
         </mesh>
       )}
       {scenario.thresholds && (

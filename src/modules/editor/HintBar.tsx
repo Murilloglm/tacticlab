@@ -1,4 +1,15 @@
+import { abilityDefinition } from '../abilities/definitions';
 import { SHAPE_HINT } from '../abilities/taxonomy';
+
+/** Dica específica para habilidades que se prendem a parede ou saem do agente. */
+function anchorHint(agentUuid: string, slot: string): string | null {
+  const definition = abilityDefinition(agentUuid, slot);
+  if (definition.anchor === 'wall') return 'Clique junto a uma parede: a carga atravessa e o efeito sai do outro lado. Arraste para mirar.';
+  if (definition.anchor === 'surface') return 'Clique junto a uma parede para prender o dispositivo nela.';
+  if (definition.anchor === 'link') return 'Clique na passagem e arraste na direção do fio: ele vai de parede a parede.';
+  if (definition.render.kind === 'directional-area') return 'Clique na direção da habilidade: a faixa sai do agente.';
+  return null;
+}
 import { findAgent, useCatalog } from '../catalog/catalogStore';
 import { docActions, useDoc } from '../strategy/docStore';
 import { Button } from '../../ui/kit';
@@ -53,7 +64,7 @@ export function HintBar() {
       break;
     case 'utility':
       if (pendingUtility) {
-        message = SHAPE_HINT[pendingUtility.shape];
+        message = anchorHint(pendingUtility.agentUuid, pendingUtility.slot) ?? SHAPE_HINT[pendingUtility.shape];
         canFinish = pendingUtility.shape === 'path' && (draft?.points.length ?? 0) >= 2;
       }
       break;

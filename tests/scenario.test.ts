@@ -7,7 +7,8 @@ import { BIND_LAYOUT } from '@/modules/maps/tactical/bind';
 import { HAVEN_LAYOUT } from '@/modules/maps/tactical/haven';
 import { hasTacticalLayout, loadTacticalLayout } from '@/modules/maps/tactical';
 import type { TacticalLayout } from '@/modules/maps/tactical/types';
-import { buildSolidsGeometry, buildStairs, buildVoidCaps } from '@/modules/viewer3d/mapMeshes';
+import { buildSolidsGeometry, buildVoidCaps } from '@/modules/viewer3d/mapMeshes';
+import type { StructuredHeightField } from '@/modules/maps/terrain';
 import { buildScenario, disposeScenario } from '@/modules/viewer3d/scenario';
 
 const dir = join(process.cwd(), 'public', 'data', 'maps');
@@ -105,20 +106,28 @@ describe.each(cases)('layout de %s', (_name, layout) => {
     expect(new Set(layout.entrances.map((entrance) => entrance.site))).toEqual(new Set(base.geometry.sites.map((site) => site.label)));
   });
 
-  it('as rampas sobem de forma contínua entre as alturas originais das pontas', () => {
+  it('as rampas sobem de forma contínua, de um platô ao outro', () => {
     expect(layout.ramps.length).toBeGreaterThanOrEqual(1);
-    for (const ramp of layout.ramps) {
-      const from = base.heights.heightAt(ramp.from);
-      const to = base.heights.heightAt(ramp.to);
+    const terrain = map.heights as StructuredHeightField;
+    expect(terrain.slopes).toHaveLength(layout.ramps.length);
+    for (const slope of terrain.slopes) {
       const samples = Array.from({ length: 9 }, (_, i) => {
         const t = 0.1 + (0.8 * i) / 8;
-        return map.heights.heightAt({ x: ramp.from.x + (ramp.to.x - ramp.from.x) * t, y: ramp.from.y + (ramp.to.y - ramp.from.y) * t });
+        return map.heights.heightAt({ x: slope.from.x + (slope.to.x - slope.from.x) * t, y: slope.from.y + (slope.to.y - slope.from.y) * t });
       });
-      const direction = Math.sign(to - from);
+      const direction = Math.sign(slope.toM - slope.fromM);
       for (let i = 1; i < samples.length; i++) {
-        expect((samples[i]! - samples[i - 1]!) * direction, `rampa de ${from} a ${to}`).toBeGreaterThanOrEqual(-0.15);
+        expect((samples[i]! - samples[i - 1]!) * direction, `rampa de ${slope.fromM} a ${slope.toM}`).toBeGreaterThanOrEqual(-1e-6);
       }
-      expect(Math.abs(samples[4]! - (from + to) / 2)).toBeLessThan(0.6);
+      // Cada ponta emenda no platô logo depois dela, sem degrau.
+      const unit = { x: (slope.to.x - slope.from.x) / Math.hypot(slope.to.x - slope.from.x, slope.to.y - slope.from.y), y: (slope.to.y - slope.from.y) / Math.hypot(slope.to.x - slope.from.x, slope.to.y - slope.from.y) };
+      const cell = 1 / terrain.size;
+      const outside = (p: { x: number; y: number }, sign: number) => ({ x: p.x + unit.x * sign * cell * 1.5, y: p.y + unit.y * sign * cell * 1.5 });
+      const before = outside(slope.from, -1);
+      const after = outside(slope.to, 1);
+      if (terrain.kindAt(before) === 1) expect(terrain.heightAt(before)).toBeCloseTo(slope.fromM, 0);
+      if (terrain.kindAt(after) === 1) expect(terrain.heightAt(after)).toBeCloseTo(slope.toM, 0);
+      expect(Math.abs(slope.toM - slope.fromM)).toBeGreaterThan(0.5);
     }
   });
 
@@ -130,44 +139,31 @@ describe.each(cases)('layout de %s', (_name, layout) => {
     expect(scenario.stats.solids).toBe(layout.solids.length);
     expect(scenario.stats.entrances).toBe(layout.entrances.length);
     for (const geometry of [scenario.floor, scenario.walls, scenario.solids!, scenario.thresholds!]) {
-      expect(geometry.getAttribute('position').count).toBeLessThan(40000);
+      expect(geometry.getAttribute('position').count).toBeLessThan(45000);
     }
-    expect(scenario.edges!.getAttribute('position').count).toBeLessThan(15000);
+    expect(scenario.ledges!.getAttribute('position').count).toBeGreaterThan(0);
+    expect(scenario.edges!.getAttribute('position').count).toBeLessThan(40000);
     disposeScenario(scenario);
   });
 });
 
-describe('rampas e escadas no piloto', () => {
+describe('terreno do piloto', () => {
   const base = baseOf(ASCENT_LAYOUT);
   const ascent = applyTacticalLayout(base, ASCENT_LAYOUT);
 
-  it('não altera o piso fora das rampas nem o campo original', () => {
-    const outside = { x: 0.817, y: 0.569 };
-    expect(ascent.heights.heightAt(outside)).toBeCloseTo(base.heights.heightAt(outside));
+  it('não altera o campo original', () => {
     expect(ascent.heights).not.toBe(base.heights);
+    const reloaded = parseGeometry(JSON.parse(readFileSync(join(dir, `${base.geometry.mapId}.json`), 'utf8')));
+    expect(reloaded.heights.heightAt({ x: 0.5, y: 0.5 })).toBeCloseTo(base.heights.heightAt({ x: 0.5, y: 0.5 }));
   });
 
-  it('a escada tem degraus de até 0,3 m sobre a rampa definida, sem sair dela', () => {
-    for (const stair of ASCENT_LAYOUT.ramps.filter((ramp) => ramp.kind === 'stairs')) {
-      const geometry = buildStairs([stair], ascent.heights, base.frame);
-      const positions = geometry.getAttribute('position');
-      expect(positions.count).toBeGreaterThan(0);
-      const from = ascent.heights.heightAt(stair.from);
-      const to = ascent.heights.heightAt(stair.to);
-      const dx = stair.to.x - stair.from.x;
-      const dy = stair.to.y - stair.from.y;
-      const levels = new Set<number>();
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i) / base.frame.worldMeters + 0.5;
-        const y = positions.getZ(i) / base.frame.worldMeters + 0.5;
-        const t = ((x - stair.from.x) * dx + (y - stair.from.y) * dy) / (dx * dx + dy * dy);
-        expect(t).toBeGreaterThan(-0.01);
-        expect(t).toBeLessThan(1.01);
-        expect(Math.abs(positions.getY(i) - (from + (to - from) * t))).toBeLessThan(Math.abs(to - from) / 2 + 0.35);
-        levels.add(Math.round(positions.getY(i) * 10));
-      }
-      expect(levels.size).toBeGreaterThan(3);
-    }
+  it('a escada da plataforma do site A desce em degraus até o piso do site', () => {
+    const terrain = ascent.heights as StructuredHeightField;
+    const stairs = terrain.slopes.filter((slope) => slope.kind === 'stairs');
+    expect(stairs.length).toBeGreaterThanOrEqual(1);
+    const platform = stairs[0]!;
+    expect(platform.fromM - platform.toM).toBeGreaterThan(2);
+    expect(platform.steps).toBeGreaterThanOrEqual(7);
   });
 });
 

@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { presetSummary, utilityDefinition } from '../abilities/definitions';
 import { CATEGORY_LABEL } from '../abilities/taxonomy';
+import type { AbilityAnchor } from '../abilities/calibration';
+
+const ANCHOR_LABEL: Record<AbilityAnchor, string> = {
+  ground: 'no chão',
+  wall: 'presa na parede, com efeito do outro lado',
+  projectile: 'projétil',
+  placement: 'objeto no chão',
+  path: 'percurso',
+  surface: 'presa numa superfície vertical',
+  link: 'fio entre duas paredes',
+};
 import { utilityTravelMs } from '../abilities/timeline';
 import { findAgent, findMap, useCatalog } from '../catalog/catalogStore';
 import { useRoom } from '../multiplayer/roomStore';
@@ -200,7 +211,7 @@ function UtilityEditor({ utility, readOnly }: { utility: Utility; readOnly: bool
         {shape.type === 'marker' && (
           <NumberField label="Direção" unit="graus" step={5} testId="utility-facing" disabled={readOnly} value={toDegrees(shape.facing ?? 0)} onChange={(deg) => set({ ...utility, shape: { ...shape, facing: toRadians(deg) } })} />
         )}
-        {shape.type === 'path' && (
+        {shape.type === 'path' && definition.render.kind !== 'directional-area' && (
           <label className="flex items-end gap-2 pb-2 text-sm">
             <input type="checkbox" disabled={readOnly} data-testid="utility-curved" checked={shape.curved} onChange={(event) => set({ ...utility, shape: { ...shape, curved: event.target.checked } })} />
             Linha curva
@@ -218,6 +229,10 @@ function UtilityEditor({ utility, readOnly }: { utility: Utility; readOnly: bool
           Levar o agente por esta trajetória
         </Button>
       )}
+
+      <p className="text-sm text-ash" data-testid="utility-anchor" data-anchor={definition.anchor}>
+        Ancoragem: {ANCHOR_LABEL[definition.anchor]}
+      </p>
 
       <p className="border-l-2 border-signal pl-2 text-xs text-ash" data-testid="visual-values-note">
         <span data-testid="utility-preset">Preset fixo: {presetSummary(definition)}.</span> Você ajusta posição, direção, trajetória e instante. Tamanho e duração são aproximações do TacticLab, não dados oficiais do jogo.

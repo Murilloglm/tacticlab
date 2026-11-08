@@ -7,7 +7,19 @@
 import type { AbilityCategory } from '../strategy/schema';
 
 export type AbilitySlot = 'Ability1' | 'Ability2' | 'Grenade' | 'Ultimate';
-export type AbilityModelId = 'wolf' | 'minion' | 'arrow' | 'orb' | 'drone' | 'turret' | 'alarm-bot' | 'trap' | 'sensor' | 'puck';
+export type AbilityModelId = 'wolf' | 'minion' | 'arrow' | 'orb' | 'drone' | 'turret' | 'alarm-bot' | 'trap' | 'sensor' | 'puck' | 'mount';
+
+/**
+ * Como a habilidade se prende ao mapa:
+ * - ground: área ou volume no chão (smokes, molotovs, faixas a partir do agente);
+ * - wall: presa a uma parede, com efeito do outro lado (cargas do Breach);
+ * - projectile: lançada, segue um arco e para onde cai;
+ * - placement: objeto deixado no chão (torreta, robô, armadilhas);
+ * - path: percorre um caminho (criaturas, dashes);
+ * - surface: dispositivo preso numa superfície vertical (câmera, sensores);
+ * - link: liga duas paredes (fio).
+ */
+export type AbilityAnchor = 'ground' | 'wall' | 'projectile' | 'placement' | 'path' | 'surface' | 'link';
 
 /** Como a habilidade aparece no 3D. Cada tipo tem um renderizador em viewer3d/abilities. */
 export type AbilityRender =
@@ -18,7 +30,13 @@ export type AbilityRender =
   | { kind: 'projectile'; model: AbilityModelId; impactRadiusM?: number; revealRadiusM?: number; pulses?: { count: number; intervalMs: number } }
   | { kind: 'creature'; model: AbilityModelId; sense?: { radiusM: number; degrees?: number } }
   | { kind: 'trail' }
-  | { kind: 'device'; model: AbilityModelId; cone?: { degrees: number; rangeM: number; outerRangeM?: number }; detectRadiusM?: number };
+  | { kind: 'device'; model: AbilityModelId; cone?: { degrees: number; rangeM: number; outerRangeM?: number }; detectRadiusM?: number; area?: { lengthM: number; widthM: number } }
+  /** Carga presa na parede. A explosão (cilindro) ou o clarão sai do outro lado. */
+  | { kind: 'wall-burst'; effect: 'flash' | 'blast'; lengthM: number; radiusM: number; maxDepthM: number; maxRangeM: number }
+  /** Faixa no chão a partir do agente. `aimed`: o alvo define o comprimento, entre o mínimo e o máximo. */
+  | { kind: 'directional-area'; startM: number; lengthM: number; minLengthM?: number; widthM: number; aimed: boolean }
+  /** Fio entre duas paredes, até o comprimento máximo. */
+  | { kind: 'link-wire'; maxLengthM: number };
 
 export interface Trajectory {
   /** Velocidade em m/s. Com ela, o tempo de percurso depende do comprimento da trajetória. */
@@ -53,6 +71,8 @@ export interface Calibration {
   render?: AbilityRender;
   /** Cor própria, para reconhecer de quem é a habilidade nos dois modos. */
   tint?: string;
+  /** Tipo de ancoragem. Sem valor, sai da renderização. */
+  anchor?: AbilityAnchor;
 }
 
 export type CalibratedField = keyof Calibration;
@@ -115,6 +135,8 @@ const UUID = {
   sage: '569fdd95-4d10-43ab-ca70-79becc718b46',
   skye: '6f2a04ca-43e0-be17-7f36-b3908627744d',
   sova: '320b2a48-4d9b-a075-30f1-1f93a9b638fa',
+  breach: '5f8d3a7f-467b-97f3-062c-13acf203c006',
+  vyse: 'efba5359-4016-a1e5-7626-b1ae76895940',
   viper: '707eab51-4836-f488-046a-cda6bf494859',
 } as const;
 
@@ -141,8 +163,8 @@ export const CALIBRATION: CalibrationRow[] = [
   { agent: 'Neon', agentUuid: UUID.neon, slot: 'Grenade', ability: 'Fast Lane', source: 'wiki', reference: 'Fast_Lane', lengthM: 46.5, heightM: 3.5, widthM: 0.3, offset: { backM: 1.5 }, durationMs: 4000, render: { kind: 'wall-energy', parallelGapM: 3.5 }, tint: '#3fd0ff', estimated: ['heightM', 'widthM'] },
   { agent: 'Deadlock', agentUuid: UUID.deadlock, slot: 'Grenade', ability: 'Barrier Mesh', source: 'wiki', reference: 'Barrier_Mesh', lengthM: 10, heightM: 3, widthM: 0.4, durationMs: 30000, render: { kind: 'wall-energy', crossed: true }, tint: '#cfd8e0', estimated: ['heightM', 'widthM'] },
   { agent: 'Astra', agentUuid: UUID.astra, slot: 'Ultimate', ability: 'Cosmic Divide', source: 'wiki', reference: 'Cosmic_Divide', lengthM: 130, heightM: 10, widthM: 0.4, durationMs: 21000, render: { kind: 'wall-energy' }, tint: '#8f6fd8', estimated: ['lengthM', 'heightM', 'widthM'] },
-  // O fio vai de parede a parede, até 15 m. O preset usa uma passagem típica, porque a cena não tem colisão.
-  { agent: 'Cypher', agentUuid: UUID.cypher, slot: 'Grenade', ability: 'Trapwire', source: 'wiki', reference: 'Trapwire', lengthM: 7, heightM: 0.25, widthM: 0.1, durationMs: null, render: { kind: 'wall-energy' }, tint: '#9fbbdb', estimated: ['lengthM', 'heightM', 'widthM'] },
+  // O fio vai de parede a parede, até 15 m: as pontas são calculadas pelas paredes do mapa.
+  { agent: 'Cypher', agentUuid: UUID.cypher, slot: 'Grenade', ability: 'Trapwire', source: 'wiki', reference: 'Trapwire', anchor: 'link', lengthM: 15, heightM: 0.25, widthM: 0.1, durationMs: null, render: { kind: 'link-wire', maxLengthM: 15 }, tint: '#9fbbdb', estimated: ['heightM', 'widthM'] },
 
   // Áreas no chão.
   { agent: 'Astra', agentUuid: UUID.astra, slot: 'Grenade', ability: 'Gravity Well', source: 'wiki', reference: 'Gravity_Well', radiusM: 4.75, durationMs: 3250, tint: '#9a78dc' },
@@ -168,9 +190,21 @@ export const CALIBRATION: CalibrationRow[] = [
   { agent: 'Sova', agentUuid: UUID.sova, slot: 'Ability2', ability: 'Recon Bolt', source: 'wiki', reference: 'Recon_Bolt', afterArrivalMs: 3200, trajectory: { speedMps: 40, arcM: 6 }, render: { kind: 'projectile', model: 'arrow', revealRadiusM: 30, pulses: { count: 2, intervalMs: 1600 } }, tint: '#4fd1c5', estimated: ['trajectory', 'afterArrivalMs'] },
   { agent: 'Sova', agentUuid: UUID.sova, slot: 'Ability1', ability: 'Shock Bolt', source: 'wiki', reference: 'Shock_Bolt', afterArrivalMs: 700, trajectory: { speedMps: 40, arcM: 6 }, render: { kind: 'projectile', model: 'arrow', impactRadiusM: 4 }, tint: '#4fd1c5', estimated: ['trajectory', 'afterArrivalMs'] },
   { agent: 'Sova', agentUuid: UUID.sova, slot: 'Grenade', ability: 'Owl Drone', source: 'wiki', reference: 'Owl_Drone', durationMs: 7000, offset: { liftM: 2.5 }, trajectory: { speedMps: 8, maxTravelMs: 7000 }, render: { kind: 'projectile', model: 'drone' }, tint: '#4fd1c5', estimated: ['trajectory', 'offset'] },
-  { agent: 'Sova', agentUuid: UUID.sova, slot: 'Ultimate', ability: "Hunter's Fury", source: 'estimate', durationMs: 6000, trajectory: { travelMs: 300 }, render: { kind: 'trail' }, tint: '#4fd1c5' },
+  { agent: 'Sova', agentUuid: UUID.sova, slot: 'Ultimate', ability: "Hunter's Fury", source: 'wiki', reference: "Hunter's_Fury", anchor: 'ground', durationMs: 6000, trajectory: { travelMs: 0 }, render: { kind: 'directional-area', startM: 0, lengthM: 66, widthM: 3.52, aimed: false }, tint: '#4fd1c5' },
   { agent: 'Skye', agentUuid: UUID.skye, slot: 'Ability2', ability: 'Guiding Light', source: 'estimate', durationMs: 2000, trajectory: { speedMps: 15, maxTravelMs: 2000, arcM: 3 }, render: { kind: 'projectile', model: 'orb' }, tint: '#e6d36b' },
   { agent: 'Omen', agentUuid: UUID.omen, slot: 'Ability1', ability: 'Paranoia', source: 'estimate', durationMs: 2500, trajectory: { speedMps: 16, maxTravelMs: 2000 }, render: { kind: 'projectile', model: 'orb' }, tint: '#6d5c9e' },
+
+  // Breach: as cargas ficam na parede e o efeito sai do outro lado; as faixas saem 8 m à frente dele.
+  { agent: 'Breach', agentUuid: UUID.breach, slot: 'Grenade', ability: 'Aftershock', source: 'wiki', reference: 'Aftershock', anchor: 'wall', durationMs: 3400, render: { kind: 'wall-burst', effect: 'blast', lengthM: 10, radiusM: 3, maxDepthM: 10, maxRangeM: 35 }, tint: '#ff9a3c', estimated: ['render'] },
+  { agent: 'Breach', agentUuid: UUID.breach, slot: 'Ability1', ability: 'Flashpoint', source: 'wiki', reference: 'Flashpoint', anchor: 'wall', durationMs: 2750, render: { kind: 'wall-burst', effect: 'flash', lengthM: 3, radiusM: 1, maxDepthM: 10, maxRangeM: 35 }, tint: '#f6e27a', estimated: ['render'] },
+  { agent: 'Breach', agentUuid: UUID.breach, slot: 'Ability2', ability: 'Fault Line', source: 'wiki', reference: 'Fault_Line', anchor: 'ground', durationMs: 3600, trajectory: { travelMs: 0 }, render: { kind: 'directional-area', startM: 8, lengthM: 56, minLengthM: 8, widthM: 8, aimed: true }, tint: '#ff9a3c' },
+  { agent: 'Breach', agentUuid: UUID.breach, slot: 'Ultimate', ability: 'Rolling Thunder', source: 'wiki', reference: 'Rolling_Thunder', anchor: 'ground', durationMs: 3000, trajectory: { travelMs: 0 }, render: { kind: 'directional-area', startM: 8, lengthM: 32, widthM: 18, aimed: false }, tint: '#ff7a3c' },
+  { agent: 'Fade', agentUuid: UUID.fade, slot: 'Ultimate', ability: 'Nightfall', source: 'wiki', reference: 'Nightfall', anchor: 'ground', durationMs: 4200, trajectory: { travelMs: 0 }, render: { kind: 'directional-area', startM: 2, lengthM: 40, widthM: 20, aimed: false }, tint: '#8a6ccf', estimated: ['render'] },
+
+  // Presos em superfície vertical, até 4,5 m de altura.
+  { agent: 'Cypher', agentUuid: UUID.cypher, slot: 'Ability2', ability: 'Spycam', source: 'wiki', reference: 'Spycam', anchor: 'surface', durationMs: null, offset: { liftM: 2.6 }, render: { kind: 'device', model: 'mount', cone: { degrees: 180, rangeM: 12 } }, tint: '#9fbbdb', estimated: ['offset', 'render'] },
+  { agent: 'Deadlock', agentUuid: UUID.deadlock, slot: 'Ability1', ability: 'Sonic Sensor', source: 'wiki', reference: 'Sonic_Sensor', anchor: 'surface', durationMs: null, offset: { liftM: 1.2 }, render: { kind: 'device', model: 'mount', area: { lengthM: 9, widthM: 8 } }, tint: '#cfd8e0', estimated: ['offset'] },
+  { agent: 'Vyse', agentUuid: UUID.vyse, slot: 'Ability2', ability: 'Arc Rose', source: 'wiki', reference: 'Arc_Rose', anchor: 'surface', durationMs: null, offset: { liftM: 1.5 }, render: { kind: 'device', model: 'mount', detectRadiusM: 10 }, tint: '#c792ff', estimated: ['offset'] },
 
   // Dispositivos.
   { agent: 'Killjoy', agentUuid: UUID.killjoy, slot: 'Ability2', ability: 'Turret', source: 'wiki', reference: 'Turret', durationMs: null, render: { kind: 'device', model: 'turret', cone: { degrees: 100, rangeM: 20, outerRangeM: 35 } }, tint: '#f2c94c' },

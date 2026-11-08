@@ -1,7 +1,8 @@
 // Controlador único das ferramentas. O 2D e o 3D só informam "ponteiro neste ponto do mapa,
 // sobre este objeto"; toda a regra de edição mora aqui e vale igual nos dois modos.
-import { abilityDefinition } from '../abilities/definitions';
-import { clampToMap, distanceMapUnits, headingBetween, mapUnitsToMeters, type MapPoint } from '../coordinates';
+import { nearestWallAnchor, throughWall } from '../abilities/anchoring';
+import { abilityDefinition, utilityDefinition } from '../abilities/definitions';
+import { clampToMap, distanceMapUnits, distanceMeters, headingBetween, mapUnitsToMeters, type MapPoint } from '../coordinates';
 import { docActions, docStore, type ChangeInput } from '../strategy/docStore';
 import {
   appendWaypoint,
@@ -103,6 +104,23 @@ function startMoveGesture(point: MapPoint): void {
   gesture = { type: 'move', anchor: point, origins, key: `move:${newId()}` };
 }
 
+/** Distância máxima, em metros, entre o clique e a parede em que a habilidade é presa. */
+const WALL_SNAP_M = 3;
+
+/**
+ * Habilidade de parede ou de superfície arrastada: volta para a face de parede mais próxima. Se não há
+ * parede perto, fica onde estava, para nunca ficar solta no chão.
+ */
+function keepAnchored(before: Utility, after: Utility): Utility {
+  const definition = utilityDefinition(after);
+  const map = editorStore.getState().map;
+  if (!map || after.shape.type !== 'marker' || (definition.anchor !== 'wall' && definition.anchor !== 'surface')) return after;
+  const wall = nearestWallAnchor(after.shape.point, map.heights, frame(), WALL_SNAP_M);
+  if (!wall) return before;
+  const facing = definition.anchor === 'surface' ? wall.normal : after.shape.facing;
+  return { ...after, shape: { ...after.shape, point: wall.point, facing } };
+}
+
 function applyMove(point: MapPoint, g: Extract<Gesture, { type: 'move' }>): void {
   const dx = point.x - g.anchor.x;
   const dy = point.y - g.anchor.y;
@@ -111,7 +129,7 @@ function applyMove(point: MapPoint, g: Extract<Gesture, { type: 'move' }>): void
       const target = clampToMap({ x: pose.x + dx, y: pose.y + dy });
       return { c: 'agents', id: ref.id, after: placeAgentAt(entity as AgentToken, target, now(), frame()) };
     }
-    if (ref.c === 'utilities') return { c: 'utilities', id: ref.id, after: translateUtility(entity as Utility, dx, dy) };
+    if (ref.c === 'utilities') return { c: 'utilities', id: ref.id, after: keepAnchored(entity as Utility, translateUtility(entity as Utility, dx, dy)) };
     return { c: 'drawings', id: ref.id, after: translateDrawing(entity as Drawing, dx, dy) };
   });
   docActions.change(inputs, { coalesce: g.key });
@@ -188,6 +206,35 @@ function placeUtility(shape: UtilityShape): void {
   });
 }
 
+/**
+ * Habilidade presa em parede. Na de superfície (câmera, sensor), olha para fora da parede. Na de
+ * parede (cargas do Breach), atravessa: a direção vem do arrasto, ou do agente até a parede, e a
+ * parede precisa ter outro lado dentro do limite da habilidade.
+ */
+function anchoredMarker(definition: ReturnType<typeof abilityDefinition>, start: MapPoint, aim: MapPoint | null, ownerTokenId: string | null): UtilityShape | null {
+  const map = editorStore.getState().map;
+  if (!map) return { type: 'marker', point: start, facing: aim ? headingBetween(start, aim) : null };
+  const wall = nearestWallAnchor(start, map.heights, frame(), WALL_SNAP_M);
+  if (!wall) {
+    toast.info('Posicione esta habilidade junto a uma parede.');
+    return null;
+  }
+  if (definition.anchor === 'surface') return { type: 'marker', point: wall.point, facing: wall.normal };
+  const owner = ownerPoint(ownerTokenId);
+  const render = definition.render;
+  if (owner && render.kind === 'wall-burst' && distanceMeters(owner, wall.point, frame()) > render.maxRangeM) {
+    toast.info(`Fora do alcance: a carga vai até ${render.maxRangeM} m do agente.`);
+    return null;
+  }
+  const facing = aim ? headingBetween(start, aim) : owner && distanceMapUnits(owner, wall.point) > 1e-6 ? headingBetween(owner, wall.point) : wall.normal + Math.PI;
+  const maxDepth = render.kind === 'wall-burst' ? render.maxDepthM : 10;
+  if (!throughWall(wall.point, facing, map.heights, frame(), maxDepth)) {
+    toast.info(`A carga precisa atravessar uma parede de até ${maxDepth} m, nessa direção.`);
+    return null;
+  }
+  return { type: 'marker', point: wall.point, facing: Math.atan2(Math.sin(facing), Math.cos(facing)) };
+}
+
 function finishUtilityDraft(endPoint: MapPoint | null): void {
   const { draft, pendingUtility } = editorStore.getState();
   if (!draft || !pendingUtility) return;
@@ -200,11 +247,23 @@ function finishUtilityDraft(endPoint: MapPoint | null): void {
       // Arrastar só reposiciona: o raio é sempre o do preset.
       placeUtility({ type: 'circle', center: end });
       break;
-    case 'marker':
+    case 'marker': {
+      if (definition.anchor === 'wall' || definition.anchor === 'surface') {
+        const placed = anchoredMarker(definition, start, dragged ? end : null, pendingUtility.ownerTokenId);
+        if (!placed) {
+          setEditor({ draft: null });
+          return;
+        }
+        placeUtility(placed);
+        break;
+      }
       placeUtility({ type: 'marker', point: start, facing: dragged ? headingBetween(start, end) : null });
       break;
+    }
     case 'wall':
-      placeUtility(wallFromGesture(start, dragged ? end : null, definition.size.lengthM, frame(), definition.offset.backM));
+      // O fio fica na passagem clicada e o arrasto só dá a direção; as pontas vêm das paredes.
+      if (definition.anchor === 'link') placeUtility({ type: 'wall', center: start, facing: dragged ? headingBetween(start, end) : 0 });
+      else placeUtility(wallFromGesture(start, dragged ? end : null, definition.size.lengthM, frame(), definition.offset.backM));
       break;
     case 'path': {
       if (draft.points.length < 2) {
@@ -317,18 +376,13 @@ export const interaction = {
         if (!pending) return true;
         if (pending.shape === 'path') {
           const existing = state.draft;
-          setEditor({
-            draft: {
-              kind: 'utility',
-              shape: 'path',
-              points: existing ? [...existing.points, point] : [ownerPoint(pending.ownerTokenId) ?? point, ...(ownerPoint(pending.ownerTokenId) ? [point] : [])],
-              cursor: point,
-            },
-          });
+          const points = existing ? [...existing.points, point] : [ownerPoint(pending.ownerTokenId) ?? point, ...(ownerPoint(pending.ownerTokenId) ? [point] : [])];
+          setEditor({ draft: { kind: 'utility', shape: 'path', points, cursor: point } });
+          if (abilityDefinition(pending.agentUuid, pending.slot).render.kind === 'directional-area' && points.length >= 2) finishUtilityDraft(null);
           return true;
         }
-        const { size, offset } = abilityDefinition(pending.agentUuid, pending.slot);
-        const previewM = pending.shape === 'circle' ? size.radiusM : pending.shape === 'wall' ? size.lengthM : undefined;
+        const { size, offset, anchor } = abilityDefinition(pending.agentUuid, pending.slot);
+        const previewM = pending.shape === 'circle' ? size.radiusM : pending.shape === 'wall' && anchor !== 'link' ? size.lengthM : undefined;
         setEditor({ draft: { kind: 'utility', shape: pending.shape, points: [point], cursor: point, previewM, previewBackM: offset.backM } });
         gesture = { type: 'draft', start: point };
         return true;
